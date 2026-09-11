@@ -1,48 +1,317 @@
 # Roadmap
 
-Fourteen phases. Each has one objective and a written exit criterion. A phase
-is done when its exit criterion is demonstrably met, not when it feels close.
-We do not start a phase before the one it depends on has exited.
+Twenty-two phases in four tiers, from idea to a scalable production system.
 
-Rule: **no feature work happens outside a phase.** If something interesting
-turns up mid-phase, it goes in `docs/backlog.md` and we carry on.
+Each phase has one objective and a written exit criterion. A phase is done
+when its exit criterion is demonstrably met, not when it feels close. We do
+not start a phase before its dependencies have exited.
 
-| # | Phase | Objective | Exits when | Status |
-|---|---|---|---|---|
-| 1 | Vision and scope | Fix what we are building and what we are not | Scope signed off, open decisions answered | **Done** (name pending) |
-| 2 | System architecture | Component boundaries, data flow, failure modes | Architecture doc + diagram agreed; every v1 feature has a home | **In review** |
-| 3 | Technology stack | Choose languages, frameworks, datastores, hosting | Each choice written as an ADR with the alternative it beat | Blocked on 2 |
-| 4 | Database and data models | Schema for instruments, prices, fundamentals, users | Migrations run; models enforce their own invariants | Blocked on 3 |
-| 5 | Market data sources | Identify sources and verify their terms in writing | Per-source note: coverage, limits, licence, redistribution rights, **as-reported history availability** | Blocked on 1 — **unblocked, highest risk** |
-| 6 | Backend and ingestion | Scheduled ingestion, storage, internal API | Daily ingest runs unattended; gaps are visible, not silent | Blocked on 4, 5 |
-| 7 | Frontend and dashboard | Company pages, charts, screening UI | A stranger can screen and read a company page unaided | Blocked on 6 |
-| 8 | Analytics and screening | Derived metrics, filters, peer comparison | Every metric traceable to its inputs and ingestion date | Blocked on 6 |
-| 9 | Accounts and personalisation | Auth, watchlists, portfolio, alerts | A user can sign in, save a watchlist, receive an alert | Blocked on 7 |
-| 10 | Testing, logging, monitoring | Confidence that breakage is detected | Ingestion failures page us; core paths covered by tests | Runs alongside 6-9 |
-| 11 | Deployment on free tier | Public URL, scheduled jobs, zero cost | Reachable by a stranger; running cost is zero | Blocked on 7 |
-| 12 | Scale path | Free-tier ceilings identified and escape routes documented | Each limit has a named trigger and a config-level fix | Blocked on 11 |
-| 13 | Documentation | Architecture, runbook, contribution flow | A stranger can run it locally from the README alone | Continuous |
-| 14 | Iterate toward production | Expand deliberately from the deferred list | Ongoing | — |
+**Rule: no work happens outside a phase.** If something interesting turns up
+mid-phase, it goes in [`docs/backlog.md`](docs/backlog.md) and we carry on.
+
+## Tiers at a glance
+
+| Tier | Phases | Milestone | Cost |
+|---|---|---|---|
+| **0 · Definition** | 1–5 | Nothing is built. Everything is decided. | — |
+| **1 · MVP on free tier** | 6–12 | **Public URL a stranger can use** | ₹0 |
+| **2 · Production readiness** | 13–18 | **Safe to leave running unattended** | ₹0 |
+| **3 · Scale and advanced** | 19–22 | Survives growth past free-tier limits | Paid, deliberately |
+
+## Three changes from the original ordering
+
+**1. Data sources moved from phase 5 to phase 3** — ahead of architecture and
+stack. The product wedge (point-in-time screening, decision 8.5) depends
+entirely on what historical data we can legally obtain. If as-reported history
+and historical index constituents are unavailable, the wedge degrades and the
+architecture changes. Choosing a technology stack before knowing this is
+choosing in the dark. It is also the phase most likely to invalidate earlier
+decisions, which is a reason to do it early, not late.
+
+**2. Ingestion split into backfill and incremental** (phases 7 and 8). These
+look like one problem and are not. Backfill loads years of history under a
+rate limit and runs for hours; incremental loads one day and runs in seconds.
+Different failure modes, different retry logic, different code.
+
+**3. Security promoted to its own phase** (15), and **data quality** to its
+own phase (17). Both were implicit. Given a bitemporal store whose entire
+value is that its history is trustworthy, silent data corruption is the
+worst thing that can happen to this product, and it deserves a gate.
+
+---
+
+# TIER 0 — DEFINITION
+
+*No code is written in this tier. The output is decisions and documents.*
+
+### Phase 1 — Vision and scope · **DONE**
+**Build:** The problem statement, the users, the v1 boundary, and the hard
+non-goals.
+**Why:** The non-goals are the constraints that shape the architecture. No
+recommendations (SEBI RA regulations), no redistribution of licensed broker
+data (exchange data vending policy), no live ticks, no order placement.
+Discovering these in phase 11 would mean rebuilding.
+**Deliverable:** [`docs/01-vision-and-scope.md`](docs/01-vision-and-scope.md)
+**Exit:** Scope signed off. Decisions 8.1–8.3, 8.5, 8.6 settled. *(Name still
+pending — blocks publication only.)*
+
+### Phase 2 — Requirements and product wedge · **DONE**
+**Build:** The answer to "why would anyone use this instead of Screener.in".
+**Why:** Current-fundamentals screening is solved and free in India. Without a
+wedge this is a portfolio piece, not a product. The wedge chosen —
+point-in-time correctness — is the one requirement that cannot be retrofitted,
+because history that was overwritten is gone.
+**Deliverable:** [`docs/01-vision-and-scope.md`](docs/01-vision-and-scope.md)
+§2.1; architecture §2.12; invariants 10–12.
+**Exit:** Wedge and universe settled. Consequences propagated to architecture.
+
+### Phase 3 — Data sources and legal verification · **NEXT**
+**Build:** A written per-source assessment: coverage, history depth, rate
+limits, cost, licence terms, redistribution rights, and — critically —
+whether as-reported (unrestated) history and historical index constituents
+are obtainable.
+**Why:** This is the highest-risk phase in the project. It can invalidate the
+wedge, the universe decision, and parts of the architecture. Everything
+downstream is built on assumptions this phase either confirms or destroys.
+Doing it after the stack is chosen means choosing blind.
+**Deliverable:** `docs/03-data-sources.md` — one section per candidate source,
+each with a verdict and a link to the terms actually read. Plus a go/no-go on
+point-in-time correctness with as-reported history, versus forward-only from
+our first ingestion.
+**Exit:** Every source we intend to use has verified terms in writing. No
+source is adopted on recollection. A primary and a fallback are identified for
+prices, fundamentals, corporate actions, and index membership.
+
+### Phase 4 — System architecture · **DRAFTED, revise after 3**
+**Build:** Component boundaries, data flow, invariants, failure modes.
+**Why:** Separating ingestion, computation and serving onto different clocks
+is what makes this survivable on free infrastructure. If a page load could
+trigger a provider fetch, one popular link exhausts a rate limit and takes the
+site down.
+**Deliverable:** [`docs/02-architecture.md`](docs/02-architecture.md) — 11
+components, 12 invariants, 10 failure modes, no technology named.
+**Exit:** Invariants agreed (they become review rules). Every v1 feature has a
+home. Revised for whatever phase 3 discovers.
+
+### Phase 5 — Technology stack
+**Build:** Language, framework, datastore, scheduler, host, frontend
+framework — each chosen deliberately.
+**Why:** Free-tier constraints and bitemporal querying narrow the field more
+than usual. A datastore that cannot express "latest version as of date X"
+efficiently makes the core feature slow.
+**Deliverable:** `docs/adr/` — one ADR per decision, each naming the
+alternative it beat and the condition under which we would revisit.
+**Exit:** Every choice is an ADR, not a preference. Free-tier limits of each
+chosen service are written down with numbers.
+
+---
+
+# TIER 1 — MVP ON FREE TIER
+
+*Goal: a public URL a stranger can use, costing nothing to run.*
+
+### Phase 6 — Data model and schema
+**Build:** Bitemporal schema for instruments, index membership, prices,
+corporate actions, fundamentals, and the ingestion run log.
+**Why:** This is where invariant 10 gets enforced. One `UPDATE` written by a
+future version of us destroys history irrecoverably, so append-only must be a
+database constraint rather than a convention.
+**Deliverable:** Migrations, model definitions, and a schema document
+explaining each time axis.
+**Exit:** Append-only enforced at the database level. A point-in-time query
+returns correct results against hand-seeded test data including a restatement
+and a delisting.
+
+### Phase 7 — Ingestion: backfill
+**Build:** Bulk historical load for the NIFTY 500 universe under provider rate
+limits, resumable after interruption.
+**Why:** Backfill is a different problem from the daily job: it runs for
+hours, it will be interrupted, and re-running it from scratch is unacceptable.
+It is also the first real test of whether the schema holds.
+**Deliverable:** A backfill command with checkpointing and a progress report.
+**Exit:** Full universe loaded with target history depth. Re-running is a
+no-op. Gaps are enumerated, not hidden.
+
+### Phase 8 — Ingestion: incremental and scheduled
+**Build:** The daily post-close job, plus event-shaped fundamentals ingestion
+for newly filed and restated statements.
+**Why:** This is the part that runs forever unattended. Its correctness
+property is that re-ingesting an unchanged value creates no new version, while
+a genuinely changed value does.
+**Deliverable:** Scheduled workers, dedup on natural key plus value, run-log
+rows for every attempt including failures.
+**Exit:** Runs unattended for a week. A failed run is visible as a row. A
+simulated restatement produces a new version, not an overwrite.
+
+### Phase 9 — Analytics and screening engine
+**Build:** Derived metrics with provenance, multi-criteria screening, peer
+comparison, and as-of-date screening.
+**Why:** This is the product. Everything before it is plumbing.
+**Deliverable:** Metric definitions, the screening query layer, materialised
+current view plus on-demand historical computation.
+**Exit:** Every metric names its inputs, period and computation time. A screen
+run as of a past date excludes companies that had not yet listed and uses
+figures as they were then reported.
+
+### Phase 10 — Read API
+**Build:** The query surface: one instrument over time, many instruments
+filtered, reference data. Freshness stamps from the run log.
+**Why:** It enforces invariant 9 — no serving path triggers an external fetch
+— and it is the contract the frontend is built against.
+**Deliverable:** A documented API with stable response shapes.
+**Exit:** Serves entirely from the store. Every response carries data
+freshness. Cold start tolerated.
+
+### Phase 11 — Frontend and dashboard
+**Build:** Company pages, price and financial history charts, the screener UI,
+peer comparison, and the as-of-date control.
+**Why:** Until this exists, nothing is demonstrable. The as-of-date control is
+where the wedge becomes visible to a user rather than a property of the store.
+**Deliverable:** A responsive web app.
+**Exit:** A stranger can screen the universe and read a company page without
+being told how, and can see where every number came from.
+
+### Phase 12 — Free-tier deployment · **MVP MILESTONE**
+**Build:** Public hosting, scheduled job execution, managed database, domain.
+**Why:** A project that only runs locally is not a product, and free-tier
+deployment has its own failure modes — sleeping databases, schedulers that
+silently do not fire, cold starts.
+**Deliverable:** A public URL and a deployment runbook.
+**Exit:** Reachable by a stranger. Scheduled ingestion runs in the deployed
+environment. Monthly cost is zero. Scheduler-did-not-fire is detected.
+
+---
+
+# TIER 2 — PRODUCTION READINESS
+
+*Goal: safe to leave running unattended and to put on a CV.*
+
+### Phase 13 — Accounts and personalisation
+**Build:** Email authentication, watchlists, manually entered portfolio,
+saved screens, price and metric alerts.
+**Why:** Moved out of MVP deliberately — the public read surface is
+demonstrable without login, and auth is where security mistakes live. Better
+built once the data layer is proven.
+**Deliverable:** Auth flow, user domain schema, alert evaluator.
+**Exit:** A user can sign in, save a screen, and receive an alert. Market data
+still has no dependency on the user domain (invariant 8).
+
+### Phase 14 — Testing strategy and coverage
+**Build:** Unit tests on metric computation, contract tests on source
+adapters, integration tests on ingestion idempotency and point-in-time
+queries, end-to-end on the screening path.
+**Why:** Tests are written continuously from phase 6 onward. This phase is the
+gate where we prove coverage of the things whose failure is *invisible* —
+lookahead leaking into a screen, a restatement silently overwriting.
+**Deliverable:** A test suite in CI, plus a written note on what is
+deliberately untested and why.
+**Exit:** The invisible-failure cases have named tests. CI blocks merge on red.
+
+### Phase 15 — Security hardening
+**Build:** Secret management, authentication hardening, rate limiting, input
+validation, dependency scanning, least-privilege database roles.
+**Why:** A public site with accounts is a target regardless of size. The
+append-only guarantee is also a security property: the database role the
+application uses must be incapable of `UPDATE` or `DELETE` on fact tables.
+**Deliverable:** A threat model for the actual attack surface and the
+mitigations in place.
+**Exit:** No secrets in the repository. Application role cannot mutate
+history. Dependency scanning in CI.
+
+### Phase 16 — Observability
+**Build:** Structured logging, ingestion metrics, data-freshness monitoring,
+alerting on failure, and an internal status page.
+**Why:** The failure that matters here is silent: data stops updating and the
+site keeps serving stale numbers confidently. Freshness monitoring is the
+specific defence.
+**Deliverable:** Dashboards and alert rules, on free tooling.
+**Exit:** A deliberately broken ingestion run produces an alert within one
+cycle. Staleness is visible to users, not only to us.
+
+### Phase 17 — Data quality and reconciliation
+**Build:** Cross-source validation, corporate-action discontinuity detection,
+fundamentals sanity rules, and a reconciliation report.
+**Why:** For a product whose entire claim is that its history is trustworthy,
+silent corruption is the worst possible failure. A missed split makes price
+history permanently wrong and nothing looks broken.
+**Deliverable:** Automated quality checks in the pipeline and a visible data
+quality report.
+**Exit:** A seeded corruption is caught by the checks rather than by a user.
+
+### Phase 18 — Documentation and runbooks · **PRODUCTION MILESTONE**
+**Build:** Architecture docs kept current, a local setup guide, operational
+runbooks, and an API reference.
+**Why:** Documentation has been continuous since phase 1; this is the
+checkpoint where it is verified rather than assumed.
+**Deliverable:** A README a stranger can follow to a running local instance.
+**Exit:** Someone who has never seen the project runs it locally using only
+the docs.
+
+---
+
+# TIER 3 — SCALE AND ADVANCED
+
+*Goal: outgrow the free tier deliberately rather than by surprise.*
+
+### Phase 19 — Performance and cost engineering
+**Build:** Query profiling, indexing strategy, caching, and cost attribution.
+**Why:** Historical as-of queries are the expensive path by design. Making
+them acceptable without materialising every date is the interesting problem.
+**Deliverable:** Benchmarks with numbers, before and after.
+**Exit:** Live screening is fast. Historical screening is tolerable. Both have
+measured, not estimated, numbers.
+
+### Phase 20 — Scale path execution
+**Build:** The documented escape routes from each free-tier ceiling — storage,
+compute, connections, scheduled job minutes, bandwidth.
+**Why:** The scale path is only real if each limit has a named trigger and a
+change that is configuration rather than a rewrite. Untested escape routes are
+assumptions.
+**Deliverable:** A scaling document with a trigger, an action and a cost per
+limit — and at least one route actually rehearsed.
+**Exit:** Each ceiling has a number, a trigger and a tested action.
+
+### Phase 21 — Private broker path
+**Build:** Per-user broker connection: credentials held per user, data fetched
+with them, served only to that user, never written to the core store.
+**Why:** It is the only legal way to offer live and personal portfolio data.
+It was fenced in the architecture from day one precisely so it could be built
+without contaminating the public store.
+**Deliverable:** Per-user integration with structurally enforced isolation —
+no write handle to the core store at all.
+**Exit:** Invariant 7 holds under test. A user's broker data is unreachable by
+any other user.
+
+### Phase 22 — Advanced intelligence and expansion
+**Build:** From the deferred list, with evidence: sector analytics, factor
+exposures, screen backtesting via `paper-trader` as a library, additional
+markets, filings and events.
+**Why:** Expansion happens after the foundation is trustworthy, and each item
+is justified by observed use rather than by the roadmap having a gap.
+**Deliverable:** Per-feature, decided one at a time.
+**Exit:** Ongoing.
+
+---
 
 ## Dependency notes
 
-Phase 5 only depends on Phase 1, so market-data research can run in parallel
-with architecture and stack work. It is also the phase most likely to force a
-rethink, because a source we assumed we could use may turn out to be off
-limits. Worth starting early for that reason.
+Phase 3 only depends on phase 1, and it is the highest-risk phase. Starting it
+early is the single biggest de-risking move available.
 
-Phase 10 is not a phase we arrive at. Tests and logging are written with the
-code in 6 through 9. It is listed separately so it gets an explicit exit
-criterion rather than being assumed.
+Phases 14, 16 and 18 describe work that happens continuously from phase 6
+onward. They are listed as phases so that they get explicit exit criteria
+rather than being assumed done.
 
-Phase 13 is continuous for the same reason, with a checkpoint at the end.
+Phase 21 is buildable much earlier in principle. It sits in tier 3 because it
+introduces credential handling, which should not be attempted before phase 15.
 
 ## Phase log
 
 | Date | Phase | Event |
 |---|---|---|
-| 2026-09-11 | 1 | Opened. Draft vision and scope written, awaiting sign-off. |
-| 2026-09-11 | 1 | Decisions settled: NSE equities only (8.1), fundamentals in v1 (8.2), public read without account (8.3). Name still open — blocks publication, not Phase 2. Phase 1 closed. |
-| 2026-09-11 | 2 | Opened. Architecture drafted: 11 components, 9 invariants, 10 failure modes. No technology named — that is Phase 3. |
-| 2026-09-11 | 1 | Reopened briefly. Product wedge settled (8.5): point-in-time screening. Universe settled (8.6): NIFTY 500 with historical membership. |
-| 2026-09-11 | 2 | Revised for bitemporality (§2.12). Invariants now 12. Surfaced historical index constituents as the likely hardest Phase 5 item. |
+| 2026-09-11 | 1 | Opened. Draft vision and scope written. |
+| 2026-09-11 | 1 | Settled: NSE equities (8.1), fundamentals in v1 (8.2), public read (8.3). Closed. |
+| 2026-09-11 | — | Architecture drafted: 11 components, 9 invariants, 10 failure modes. |
+| 2026-09-11 | 2 | Wedge settled (8.5): point-in-time screening. Universe (8.6): NIFTY 500. |
+| 2026-09-11 | — | Architecture revised for bitemporality (§2.12). Invariants now 12. |
+| 2026-09-11 | — | Roadmap expanded to 22 phases in 4 tiers. Data sources moved to phase 3; ingestion split; security and data quality promoted to phases. |
