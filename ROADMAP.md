@@ -240,7 +240,7 @@ history permanently wrong and nothing looks broken.
 quality report.
 **Exit:** A seeded corruption is caught by the checks rather than by a user.
 
-### Phase 18 — Documentation and runbooks · **PRODUCTION MILESTONE**
+### Phase 18 — Documentation and runbooks · **DONE — PRODUCTION MILESTONE**
 **Build:** Architecture docs kept current, a local setup guide, operational
 runbooks, and an API reference.
 **Why:** Documentation has been continuous since phase 1; this is the
@@ -322,6 +322,7 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
 | 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
 | 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
+| 2026-09-11 | 18 | **Docs verified by running them.** Wiped venv, node_modules, both databases and the web role, then followed the README verbatim — it worked, and found a missing `ii_web` role step, a stale-dev-server trap, and a wrong Next workspace root. Makefile so docs and commands cannot drift. 40 doc-rot tests. **Tier 2 complete.** |
 | 2026-09-11 | 16 | **Observability.** Structured JSON logging with run correlation and key-name redaction — the Phase 6 item architecture asked for and I skipped. Edge-triggered operational alerts that resolve. Public /status page and `cli status`. Exit criterion demonstrated: broken run produces a CRITICAL alert in one cycle, 4 further cycles produce none. 319 tests. |
 | 2026-09-11 | 15 | **Security.** Threat model, rate limiting on login flooding and the historical-screen DoS, exhaustive privilege audit, security headers. `npm audit` found a **critical Next.js RCE** (GHSA-9qr9-h5gf-34mp) — fixed by a patch bump. Removed a committed password and a `.env` example the gitignore had hidden. 293 tests. |
 | 2026-09-11 | 13 | **Accounts.** Magic-link auth with no passwords anywhere (ADR 007), user data in its own schema with row level security, edge-triggered alerts. 258 tests. Found that the isolation tests proved nothing -- superusers bypass RLS and the harness runs as one. |

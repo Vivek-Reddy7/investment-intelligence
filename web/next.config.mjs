@@ -47,6 +47,12 @@ const headers = [
 
 /** @type {import('next').NextConfig} */
 export default {
+  // Pin the workspace root. Without this Next walks up looking for a lockfile
+  // and can settle on one in a parent directory — on this machine it picked
+  // `~/package-lock.json`, which belongs to something else entirely. That
+  // changes which files get traced for the production bundle, so it is a
+  // correctness issue and not only a warning.
+  outputFileTracingRoot: import.meta.dirname,
   poweredByHeader: false,   // no free version disclosure
   async headers() {
     return [{ source: "/:path*", headers }];
