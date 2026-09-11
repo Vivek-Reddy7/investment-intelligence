@@ -20,6 +20,8 @@ from investment_intelligence.companies import STAGE_ONE
 from investment_intelligence.db import connect, migrate
 from investment_intelligence.ingest import backfill, incremental
 from investment_intelligence.ingest import rejections as rejection_log
+from investment_intelligence.observability import logging as structured
+from investment_intelligence.observability import status as status_mod
 from investment_intelligence.sources.edgar import EdgarSource
 
 SOURCE_ID = "SEC_EDGAR"
@@ -182,6 +184,58 @@ def cmd_schedule(args: argparse.Namespace) -> None:
     print(f"scheduled {SOURCE_ID}/FUNDAMENTALS, stale after {args.max_age_days} days")
 
 
+def cmd_status(args: argparse.Namespace) -> None:
+    """The operational snapshot. Exits non-zero if anything is wrong.
+
+    Distinct from `health`, which answers one question. This is what an
+    operator looks at when something is reported broken and they do not yet
+    know what.
+    """
+    with connect() as conn:
+        status_mod.detect(conn)
+        conn.commit()
+        snap = status_mod.snapshot(conn)
+
+    print(f"OVERALL: {snap['overall']}")
+
+    if snap["open_alerts"]:
+        print("\nOPEN ALERTS")
+        for a in snap["open_alerts"]:
+            told = "notified" if a["notified_at"] else "NOT NOTIFIED"
+            print(f"  [{a['severity']}] {a['source_id']}/{a['kind']}: {a['status']}  ({told})")
+            print(f"      {a['detail']}")
+
+    print("\nINGESTION HEALTH")
+    if not snap["health"]:
+        print("  nothing is scheduled — nothing is being monitored")
+    for h in snap["health"]:
+        mark = "ok" if h["status"] == "OK" else "!!"
+        print(f"  {mark} {h['source_id']}/{h['kind']}: {h['status']}"
+              f"  last success {h['last_success']}")
+
+    print("\nRECENT RUNS")
+    for r in snap["recent_runs"][:5]:
+        print(f"  run {r['run_id']:>4} {r['outcome']:8s} {r['seconds'] or '?':>6}s"
+              f"  written={r['rows_written']:<6} rejected={r['rows_rejected']}")
+
+    if snap["inert_checks"]:
+        # A check that never ran is not a passing check.
+        print(f"\nINERT QUALITY CHECKS: {', '.join(snap['inert_checks'])}")
+
+    cov = snap["coverage"]
+    if cov:
+        print(f"\nCOVERAGE  {cov['instruments']} instruments, {cov['facts']} facts, "
+              f"{cov['period_types']} period types, {cov['earliest']} to {cov['latest']}")
+
+    if snap["rejections"]:
+        print("\nREJECTED AT INGESTION")
+        for row in snap["rejections"]:
+            print(f"  {row['reason_class']:26s} {row['rejections']:>5}")
+
+    pending = snap["open_alerts"]
+    raise SystemExit(1 if snap["overall"] in ("CRITICAL", "UNMONITORED") else 0)
+
+
 def cmd_quality(args: argparse.Namespace) -> None:
     """The data quality report.
 
@@ -306,6 +360,8 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("health").set_defaults(func=cmd_health)
 
+    sub.add_parser("status").set_defaults(func=cmd_status)
+
     qual = sub.add_parser("quality")
     qual.add_argument("--limit", type=int, default=20)
     qual.set_defaults(func=cmd_quality)
@@ -319,6 +375,8 @@ def main(argv: list[str] | None = None) -> None:
     show.set_defaults(func=cmd_show)
 
     args = parser.parse_args(argv)
+    # JSON to stdout, so a CI log is queryable three weeks later.
+    structured.configure()
     args.func(args)
 
 

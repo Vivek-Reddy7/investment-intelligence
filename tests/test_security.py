@@ -75,9 +75,15 @@ EXPECTED_GRANTS = {
     "ii_alerts": {
         "public": {"SELECT": "ALL"},
         "app": {
-            "SELECT": {"alert_rules", "alert_state", "alert_deliveries"},
-            "INSERT": {"alert_rules", "alert_state", "alert_deliveries"},
-            "UPDATE": {"alert_rules", "alert_state", "alert_deliveries"},
+            # Plus operational_alerts, because the evaluator is also what
+            # detects and resolves ingestion problems (mig. 022). It cannot
+            # read watchlists, portfolios or saved screens.
+            "SELECT": {"alert_rules", "alert_state", "alert_deliveries",
+                       "operational_alerts"},
+            "INSERT": {"alert_rules", "alert_state", "alert_deliveries",
+                       "operational_alerts"},
+            "UPDATE": {"alert_rules", "alert_state", "alert_deliveries",
+                       "operational_alerts"},
         },
     },
 }
@@ -120,6 +126,17 @@ def test_no_role_holds_a_privilege_nobody_decided_on(conn, role):
             assert not over, (
                 f"{role} holds {privilege} on {sorted(over)} in {schema}; "
                 "add it to EXPECTED_GRANTS deliberately or revoke it")
+
+
+def test_the_alert_role_cannot_read_personal_data(conn):
+    """The evaluator works across all users by design, so it is the role most
+    worth checking. It may touch rules, state, deliveries and operational
+    alerts -- and must not see a watchlist, a portfolio or a saved screen."""
+    grants = _actual_grants(conn, "ii_alerts").get("app", {})
+    reachable = set().union(*grants.values()) if grants else set()
+    for forbidden in ("watchlists", "watchlist_items", "portfolio_entries",
+                      "saved_screens", "users", "sessions", "login_tokens"):
+        assert forbidden not in reachable, f"ii_alerts can reach app.{forbidden}"
 
 
 def test_the_ingestion_role_holds_nothing_on_the_user_domain(conn):

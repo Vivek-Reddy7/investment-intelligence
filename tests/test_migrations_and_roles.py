@@ -263,6 +263,10 @@ RLS_EXEMPT = {
     "rate_limits":
         "A limiter that could only see its own user's attempts would not be a "
         "limiter. Subjects are stored hashed so it is not a visitor log.",
+    "operational_alerts":
+        "Operational rather than user-owned: an ingestion job going stale "
+        "belongs to nobody, so there is no user_id to scope it to. Contents "
+        "are job names and statuses, already public on /status.",
 }
 
 

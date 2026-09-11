@@ -37,6 +37,7 @@ from investment_intelligence.ingest.writer import (
     write_filing,
 )
 from investment_intelligence.ingest import rejections as rejection_log
+from investment_intelligence.observability import logging as structured
 from investment_intelligence.sources.base import FilingSource, Rejection
 
 log = logging.getLogger(__name__)
@@ -146,6 +147,42 @@ def run(
 
     already_seen = known_filing_refs(conn, source.source_id)
 
+    # Every line below carries this run id, so "what happened in run 47" is a
+    # single grep rather than a reconstruction from timestamps.
+    with structured.run_context(report.run_id, source_id=source.source_id,
+                                job="incremental"):
+        structured.info(log, "incremental cycle started",
+                        window_start=str(since), window_end=str(until),
+                        known_filings=len(already_seen))
+        _run_cycle(conn, source, report, already_seen, since, until, limiter)
+
+        if refresh_metrics:
+            with conn.cursor() as cur:
+                cur.execute("SELECT refresh_metric_values()")
+                report.metrics_refreshed = cur.fetchone()[0]
+
+        structured.info(log, "incremental cycle finished",
+                        outcome=report.outcome,
+                        instruments_checked=report.instruments_checked,
+                        instruments_failed=report.instruments_failed,
+                        new_filings=report.new_filings,
+                        facts_written=report.writes.facts_written,
+                        rejections=len(report.rejections),
+                        metrics_refreshed=report.metrics_refreshed)
+
+    rejection_log.record(conn, report.run_id, source.source_id, report.rejections)
+    _finish_run(conn, report)
+    conn.commit()
+    return report
+
+
+def _run_cycle(conn, source, report, already_seen, since, until, limiter) -> None:
+    """The per-instrument loop, split out so `run` reads as a sequence.
+
+    Extracted when structured logging was threaded through: the wrapping
+    context manager plus the loop plus the teardown made one function that had
+    to be read three times to follow.
+    """
     for instrument_id, ref in tracked(conn, source.key_scheme):
         report.instruments_checked += 1
         try:
@@ -173,26 +210,15 @@ def run(
 
         except UnknownInstrument as exc:
             conn.rollback()
-            log.warning("incremental: unknown instrument %s: %s", ref, exc)
+            structured.warning(log, "unknown instrument", instrument_ref=ref,
+                               reason=str(exc))
             report.instruments_failed += 1
 
         except Exception as exc:  # noqa: BLE001 - one company must not end the cycle
             conn.rollback()
-            log.warning("incremental: %s failed: %s", ref, exc)
+            structured.warning(log, "instrument failed", instrument_ref=ref,
+                               error_type=type(exc).__name__, reason=str(exc))
             report.instruments_failed += 1
-
-    # Metrics are derived and must be recomputed, or the site serves fresh
-    # facts behind stale ratios -- which is worse than being uniformly stale,
-    # because the two disagree and nothing says which to trust.
-    if refresh_metrics:
-        with conn.cursor() as cur:
-            cur.execute("SELECT refresh_metric_values()")
-            report.metrics_refreshed = cur.fetchone()[0]
-
-    rejection_log.record(conn, report.run_id, source.source_id, report.rejections)
-    _finish_run(conn, report)
-    conn.commit()
-    return report
 
 
 def health(conn: psycopg.Connection) -> list[dict]:

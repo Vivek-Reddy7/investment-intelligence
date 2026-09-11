@@ -102,6 +102,81 @@ export async function ingestionHealth(): Promise<JobHealth[]> {
   return rows;
 }
 
+export type StatusSnapshot = {
+  overall: string;
+  health: JobHealth[];
+  open_alerts: Record<string, unknown>[];
+  inert_checks: string[];
+  recent_runs: Record<string, unknown>[];
+  rejections: Record<string, unknown>[];
+  coverage: Record<string, unknown>;
+};
+
+/**
+ * The operational snapshot, for /status.
+ *
+ * Read-only and deliberately public. Everything here is already inferable
+ * from the site — the freshness banner says when data last updated, and every
+ * figure links to its filing — so publishing the operational view costs
+ * nothing and makes staleness impossible to miss. It exposes no connection
+ * string, no user data and no secret; `detail` fields describe ingestion
+ * state, not infrastructure.
+ *
+ * Detection is NOT run here. A page render must not have side effects, and a
+ * crawler hitting /status should not be able to open alerts. The scheduled
+ * job calls `cli status` for that.
+ */
+export async function statusSnapshot(): Promise<StatusSnapshot> {
+  const [health, alerts, runs, quality, rejections, coverage] = await Promise.all([
+    pool.query(`SELECT source_id, kind, max_age::text, last_success, age::text,
+                       last_outcome, status FROM ingestion_health()`),
+    pool.query(`SELECT alert_id, source_id, kind, status, severity, detail,
+                       fired_at, notified_at
+                FROM app.operational_alerts WHERE resolved_at IS NULL
+                ORDER BY severity, fired_at`),
+    pool.query(`SELECT run_id, source_id, kind, outcome, started_at,
+                       rows_written, rows_rejected, error,
+                       round(extract(epoch FROM finished_at - started_at)::numeric, 1)
+                         AS seconds
+                FROM ingestion_runs ORDER BY started_at DESC LIMIT 10`),
+    pool.query(`SELECT check_code, severity, evaluable, findings
+                FROM quality_coverage()`),
+    pool.query(`SELECT reason_class, count(*)::int AS rejections,
+                       count(DISTINCT instrument_ref)::int AS instruments
+                FROM ingestion_rejections GROUP BY reason_class
+                ORDER BY count(*) DESC`),
+    pool.query(`SELECT count(DISTINCT instrument_id)::int AS instruments,
+                       count(*)::int AS facts,
+                       count(DISTINCT period_type)::int AS period_types,
+                       -- ::text on purpose. A DATE has no timezone, and pg
+                       -- hands it back as a JS Date, which then renders
+                       -- through the viewer's offset -- enough to display the
+                       -- wrong day for a date near midnight. Casting in SQL
+                       -- avoids the conversion rather than correcting it.
+                       min(period_end)::text AS earliest,
+                       max(period_end)::text AS latest
+                FROM financial_facts`),
+  ]);
+
+  const inert = quality.rows.filter((q) => q.evaluable === 0).map((q) => q.check_code);
+  const unhealthy = health.rows.filter((h) => h.status !== "OK");
+  const overall =
+    health.rowCount === 0 ? "UNMONITORED"
+    : alerts.rows.some((a) => a.severity === "CRITICAL") ? "CRITICAL"
+    : unhealthy.length || inert.length ? "DEGRADED"
+    : "OK";
+
+  return {
+    overall,
+    health: health.rows,
+    open_alerts: alerts.rows,
+    inert_checks: inert,
+    recent_runs: runs.rows,
+    rejections: rejections.rows,
+    coverage: coverage.rows[0] ?? {},
+  };
+}
+
 export async function metricDefinitions(): Promise<MetricDef[]> {
   const { rows } = await pool.query<MetricDef>(`
     SELECT metric_code, label, definition, family, unit, higher_is_better
