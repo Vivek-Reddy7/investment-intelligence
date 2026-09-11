@@ -247,24 +247,64 @@ def test_app_role_can_write_user_data(conn):
     assert {"SELECT", "INSERT", "UPDATE", "DELETE"} <= granted
 
 
+# Tables in `app` that are deliberately NOT row-level-secured, each with the
+# reason. A bare list of names would grow into a set of exemptions nobody
+# remembers granting, which is how the one that mattered gets added.
+RLS_EXEMPT = {
+    "sessions":
+        "Looked up by token hash before any user is known, so there is no "
+        "current_user_id to filter on. The token IS the authorisation.",
+    "login_tokens":
+        "Same: consumed before the user exists, and for a brand-new address "
+        "there is no account to scope to.",
+    "alert_state":
+        "Evaluator-owned bookkeeping, not user-visible. Keyed on rule_id, and "
+        "the rules themselves are policied.",
+    "rate_limits":
+        "A limiter that could only see its own user's attempts would not be a "
+        "limiter. Subjects are stored hashed so it is not a visitor log.",
+}
+
+
 def test_row_level_security_is_enabled_and_forced_on_every_user_table(conn):
     """Enabled is not enough: without FORCE, the table owner bypasses the
     policies, and on a managed database the owner is often the role the
-    application connects as."""
+    application connects as.
+
+    Any new table in `app` must either carry RLS or be added to RLS_EXEMPT
+    with a reason — the default is protected.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
             FROM   pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE  n.nspname = 'app' AND c.relkind = 'r'
-              AND  c.relname NOT IN ('sessions', 'login_tokens', 'alert_state')
             """
         )
         rows = cur.fetchall()
     assert rows
     for name, enabled, forced in rows:
-        assert enabled, f"{name}: row level security not enabled"
-        assert forced, f"{name}: row level security not FORCEd"
+        if name in RLS_EXEMPT:
+            continue
+        assert enabled, (
+            f"{name}: row level security not enabled. Either policy it or add "
+            "it to RLS_EXEMPT with a reason.")
+        assert forced, f"{name}: row level security enabled but not FORCEd"
+
+
+def test_every_rls_exemption_names_a_real_table(conn):
+    """A stale exemption is a hole waiting for a table to be created with that
+    name."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT c.relname FROM pg_class c JOIN pg_namespace n "
+            "ON n.oid = c.relnamespace WHERE n.nspname = 'app' AND c.relkind = 'r'")
+        actual = {r[0] for r in cur.fetchall()}
+    stale = set(RLS_EXEMPT) - actual
+    assert stale == set(), f"remove these stale RLS exemptions: {sorted(stale)}"
+    for name, reason in RLS_EXEMPT.items():
+        assert len(reason) > 30, f"{name}: give a real reason, not a label"
 
 
 def test_ingest_role_can_insert_but_not_update_facts(conn, seeded):

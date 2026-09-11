@@ -209,7 +209,7 @@ lookahead leaking into a screen, a restatement silently overwriting.
 deliberately untested and why.
 **Exit:** The invisible-failure cases have named tests. CI blocks merge on red.
 
-### Phase 15 — Security hardening
+### Phase 15 — Security hardening · **DONE**
 **Build:** Secret management, authentication hardening, rate limiting, input
 validation, dependency scanning, least-privilege database roles.
 **Why:** A public site with accounts is a target regardless of size. The
@@ -322,6 +322,7 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
 | 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
 | 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
+| 2026-09-11 | 15 | **Security.** Threat model, rate limiting on login flooding and the historical-screen DoS, exhaustive privilege audit, security headers. `npm audit` found a **critical Next.js RCE** (GHSA-9qr9-h5gf-34mp) — fixed by a patch bump. Removed a committed password and a `.env` example the gitignore had hidden. 293 tests. |
 | 2026-09-11 | 13 | **Accounts.** Magic-link auth with no passwords anywhere (ADR 007), user data in its own schema with row level security, edge-triggered alerts. 258 tests. Found that the isolation tests proved nothing -- superusers bypass RLS and the harness runs as one. |
 | 2026-09-11 | 7 | **215 quarterly facts recovered** from the Phase 17 rejection classification. Quarter now derived from period end rather than EDGAR's unreliable `fp`; fiscal calendar learned per company, fixing Genpact's December year end. Store went from 0 to 551 non-annual facts. Real failures down from 372 to 6. 216 tests. |
 | 2026-09-11 | 17 | **Data quality.** Six accounting-identity checks; cross-currency validation gives cross-source-style checking from a single source (43 pairs, 0 inconsistencies). Coverage reported beside findings so an inert check cannot read as clean data. The 372 rejections classified: 366 come from 2 companies and are one parser gap, now diagnosed precisely in the backlog. 202 tests. |

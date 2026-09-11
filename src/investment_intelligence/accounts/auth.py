@@ -32,6 +32,12 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 
+from investment_intelligence.accounts.ratelimit import (
+    LOGIN_PER_CLIENT,
+    LOGIN_PER_EMAIL,
+    check_and_count,
+)
+
 # A magic link is short-lived because it sits in an inbox, which is a less
 # trustworthy place than a cookie jar.
 LOGIN_TOKEN_TTL = timedelta(minutes=15)
@@ -79,15 +85,29 @@ class LoginLink:
     expires_at: datetime
 
 
-def begin_login(conn: psycopg.Connection, email: str) -> LoginLink:
+def begin_login(
+    conn: psycopg.Connection, email: str, *, client: str | None = None
+) -> LoginLink:
     """Issue a single-use login token for an email address.
 
     Deliberately does NOT check whether the address has an account, and does
     not create one. Both would make this an enumeration oracle: the caller
     learns nothing from the response either way, and the account is created on
     successful consumption instead.
+
+    Rate limited on two axes. Per address, so this cannot be pointed at
+    someone else's inbox; per client, so one caller cannot spray many
+    addresses. `client` is optional only so tests and scripts can call this
+    directly -- the HTTP layer must always supply it, and there is a test
+    asserting the limiter actually engages.
     """
     address = normalise_email(email)
+
+    # The address is normalised first, so Alice@x.com and alice@x.com share a
+    # counter. Otherwise case variation multiplies the quota.
+    check_and_count(conn, LOGIN_PER_EMAIL, address)
+    if client:
+        check_and_count(conn, LOGIN_PER_CLIENT, client)
     token = secrets.token_urlsafe(TOKEN_BYTES)
     expires = datetime.now(timezone.utc) + LOGIN_TOKEN_TTL
 
