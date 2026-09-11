@@ -95,7 +95,7 @@ home. Revised in §2.13 for the Phase 3 licensing finding — component set
 unchanged, roles inverted: fundamentals become the primary ingester, prices
 move to the private path.
 
-### Phase 5 — Technology stack · **IN PROGRESS, ADR 006 open**
+### Phase 5 — Technology stack · **DONE**
 **Build:** Language, framework, datastore, scheduler, host, frontend
 framework — each chosen deliberately.
 **Why:** Free-tier constraints and bitemporal querying narrow the field more
@@ -112,7 +112,7 @@ chosen service are written down with numbers.
 
 *Goal: a public URL a stranger can use, costing nothing to run.*
 
-### Phase 6 — Data model and schema
+### Phase 6 — Data model and schema · **NEXT**
 **Build:** Bitemporal schema for instruments, index membership, prices,
 corporate actions, fundamentals, and the ingestion run log.
 **Why:** This is where invariant 10 gets enforced. One `UPDATE` written by a
@@ -322,3 +322,4 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
 | 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
 | 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
+| 2026-09-11 | 5 | ADR 006 settled: Next.js on Vercel. Verified Hobby limits; commercial use prohibited (a licensing trigger, not a capacity one). Ingestion cannot run on Vercel due to function duration limits, which independently enforces the serving/ingestion split from architecture §1. **Tier 0 complete.** |

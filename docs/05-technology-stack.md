@@ -1,6 +1,6 @@
 # Phase 5 — Technology Stack
 
-Status: **draft — ADR 006 open, needs a decision**
+Status: **complete — all six ADRs settled; auth deferred to Phase 13**
 Last updated: 2026-09-11
 Depends on: [03-data-sources.md](03-data-sources.md), [02-architecture.md](02-architecture.md)
 
@@ -179,7 +179,9 @@ accessor, not a framework.
 
 ---
 
-## ADR 006 — Web stack · **OPEN, decision needed**
+## ADR 006 — Next.js on Vercel for the read API and web app
+
+*Settled 2026-09-11.*
 
 **Context.** Two surfaces: the read API (phase 10) and the web app (phase 11).
 Architecture §2.8 requires the API to serve only from the store and to keep
@@ -205,10 +207,50 @@ One language shared with ingestion, and the service boundary is real from day
 one rather than extracted later. Most moving parts, most deployment surface,
 slowest to a public URL.
 
-**Recommendation: A.** The demonstrable thing about this project is the data
+**Decision: A.** The demonstrable thing about this project is the data
 engineering and the point-in-time correctness, not the front-end framework.
 Option A minimises the infrastructure between here and a public link, and the
 breadth it adds is a genuine gap next to the existing Angular experience.
+
+### Verified Hobby-plan limits (Sep 2026)
+
+| Limit | Value |
+|---|---|
+| Fast Data Transfer | 100 GB / month |
+| Edge requests | 1 million / month |
+| Function invocations | 1 million / month *(one source says 100K — confirm against Vercel's own limits page before relying on it)* |
+| Active function CPU | 4 CPU-hours / month |
+| Build execution | 6,000 minutes / month |
+| Deployments | 100 / day |
+| Seats | 1, no collaborators |
+| Cron jobs | 100 per project, but **once-per-day maximum frequency** on Hobby, fired at any point within the specified hour |
+
+### Two constraints that came out of verifying this
+
+**1. Commercial use is prohibited on Hobby.** Vercel describes the plan as
+personal and non-commercial. A zero-revenue portfolio project is within that;
+adding ads, subscriptions or any paid tier moves it to Pro at $20/month. This
+is a **licensing trigger, not a capacity trigger** — it fires on a business
+decision rather than a usage number, so it belongs in the phase 20 scale
+document alongside the quantitative ceilings.
+
+**2. Ingestion cannot run on Vercel, which reinforces ADR 004.** Serverless
+function duration limits make a multi-hour rate-limited backfill (phase 7)
+impossible there. GitHub Actions allows roughly six hours per job, which
+suits it. So the split is:
+
+- **Vercel** — web app, read API, serving only. Never ingestion.
+- **GitHub Actions** — ingestion, both backfill and incremental.
+
+That happens to match architecture §1's separation of serving from ingestion
+onto different clocks, which was chosen for rate-limit reasons before either
+platform was picked. The platform limits now enforce the same boundary
+independently.
+
+Vercel cron is noted as a *fallback* scheduler: its once-daily cadence is
+adequate for post-close ingestion triggering, and it does not share GitHub's
+60-day auto-disable failure mode. Worth remembering if ADR 004's mitigation
+proves insufficient.
 
 ---
 
@@ -219,6 +261,6 @@ breadth it adds is a genuine gap next to the existing Angular experience.
 - [x] ADR 003 ingestion language
 - [x] ADR 004 scheduler, with its failure mode identified and mitigated
 - [x] ADR 005 bitemporal approach, with enforcement mechanism
-- [ ] ADR 006 web stack — **open**
+- [x] ADR 006 web stack — Next.js on Vercel, with verified Hobby limits
 - [ ] Auth ADR — deliberately deferred to phase 13
-- [ ] Phase 6 may then begin
+- [x] Phase 6 may begin
