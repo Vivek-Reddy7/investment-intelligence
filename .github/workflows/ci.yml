@@ -1,0 +1,136 @@
+# CI. Red blocks merge — that is the Phase 14 exit criterion, and a suite that
+# does not gate anything is a suite people learn to ignore.
+#
+# Postgres runs as a service container rather than being mocked. The store's
+# correctness guarantees are database features: append-only triggers, role
+# privileges, DISTINCT ON for point-in-time queries, interval arithmetic for
+# ingestion health. A fake would test the fake.
+#
+# No network in CI. The EDGAR adapter is tested against a cached
+# `companyfacts` response in tests/fixtures. Hammering a rate-limited public
+# service on every push would be rude, and a red build caused by someone
+# else's outage teaches the team to ignore red builds.
+
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ii_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ii_test
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt pytest-cov
+
+      - name: Tests
+        run: python -m pytest -q --cov=investment_intelligence --cov-report=term-missing
+
+      # A floor, not a target. Chasing a high number rewards testing the
+      # trivial; the real gate is the invisible-failure inventory in
+      # docs/14-testing-strategy.md, which is checked by a human at review.
+      - name: Coverage floor
+        run: python -m pytest -q --cov=investment_intelligence --cov-fail-under=80
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+        env:
+          # Build-time only; no query runs during `next build` because every
+          # route is force-dynamic.
+          DATABASE_URL: postgresql://unused@localhost:5432/unused
+
+  # The API contract test needs both halves running, so it gets its own job.
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ii_dev
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ii_dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: web/package-lock.json }
+
+      - run: pip install -r requirements.txt
+
+      - name: Migrate and seed
+        run: PYTHONPATH=src python -m investment_intelligence.cli seed
+
+      # Loads the cached EDGAR fixture rather than calling the SEC, so the
+      # contract test has real data to assert against without the network.
+      - name: Load fixture data
+        run: PYTHONPATH=src python scripts/load_fixture.py
+
+      - name: Start web
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          npm start &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3100/api/v1/meta && break
+            sleep 2
+          done
+
+      - name: API contract
+        working-directory: web
+        run: node scripts/contract-test.mjs

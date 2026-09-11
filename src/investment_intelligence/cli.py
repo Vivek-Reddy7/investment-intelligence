@@ -183,9 +183,16 @@ def cmd_schedule(args: argparse.Namespace) -> None:
 
 def cmd_gaps(args: argparse.Namespace) -> None:
     with connect() as conn:
+        total = backfill.planned(conn, JOB)
         found = backfill.gaps(conn, JOB, "SEC_CIK")
+    if total == 0:
+        # Distinct from "no gaps". An unplanned job has not succeeded, it has
+        # not started, and saying "no gaps" here is the reassuring answer to
+        # the wrong question.
+        print(f"job {JOB!r} has no checkpoints — nothing has been planned or run")
+        raise SystemExit(1)
     if not found:
-        print("no gaps: every tracked instrument is DONE")
+        print(f"no gaps: all {total} tracked instruments are DONE")
         return
     for state, refs in found.items():
         print(f"{state} ({len(refs)}):")

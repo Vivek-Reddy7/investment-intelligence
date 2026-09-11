@@ -261,6 +261,20 @@ def run(
     return report
 
 
+def planned(conn: psycopg.Connection, job: str) -> int:
+    """How many checkpoints exist for this job.
+
+    Needed because `gaps()` returns an empty dict in two opposite situations:
+    every instrument is DONE, and nothing was ever planned. Reporting "no
+    gaps" for the second is the reassuring answer to the wrong question --
+    the same fail-quiet shape as the Phase 9 empty-universe bug, where a
+    screen returning nothing looked like "no matches".
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM backfill_checkpoints WHERE job = %s", (job,))
+        return cur.fetchone()[0]
+
+
 def gaps(conn: psycopg.Connection, job: str, scheme: str = 'SEC_CIK') -> dict[str, list[str]]:
     """What the backfill did not load, enumerated rather than hidden.
 

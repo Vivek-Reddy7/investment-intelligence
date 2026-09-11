@@ -47,7 +47,26 @@ class FixtureSource:
         if ref in self.fail_on:
             raise ConnectionError(f"simulated provider failure for {ref}")
 
-        for item in self.documents.get(ref, []):
+        if ref not in self.documents:
+            # A reference this source has never heard of is a Rejection, not
+            # silence. Found by the adapter contract test: EdgarSource already
+            # behaved this way and FixtureSource yielded nothing, so the test
+            # double had quietly diverged from the real adapter -- which means
+            # the engine tests were validating behaviour production does not
+            # have.
+            #
+            # The distinction the engine needs: a ref present here with an
+            # empty list is a KNOWN company with nothing to load (SKIPPED); a
+            # ref absent entirely is a configuration gap. Collapsing them is
+            # the same mistake as collapsing DONE into SKIPPED.
+            yield Rejection(
+                instrument_ref=ref,
+                detail="not in fixture",
+                reason="unknown reference: this source has no record of it",
+            )
+            return
+
+        for item in self.documents[ref]:
             if isinstance(item, Rejection):
                 yield item
             elif since <= item.period_end <= until:

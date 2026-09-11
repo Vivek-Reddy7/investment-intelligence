@@ -198,7 +198,7 @@ built once the data layer is proven.
 **Exit:** A user can sign in, save a screen, and receive an alert. Market data
 still has no dependency on the user domain (invariant 8).
 
-### Phase 14 — Testing strategy and coverage
+### Phase 14 — Testing strategy and coverage · **DONE**
 **Build:** Unit tests on metric computation, contract tests on source
 adapters, integration tests on ingestion idempotency and point-in-time
 queries, end-to-end on the screening path.
@@ -322,6 +322,7 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
 | 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
 | 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
+| 2026-09-11 | 14 | **179 tests, 91% coverage, CI gating merges.** Real deliverable is the 24-row invisible-failure inventory in 14-testing-strategy.md. Adapter contract suite added — found that FixtureSource had diverged from EdgarSource, so engine tests were validating behaviour production lacks. Also fixed `gaps()` reporting 'no gaps' when nothing was planned. |
 | 2026-09-11 | 8 | **Daily job built.** 8s over 10 companies, 0 writes when nothing changed. ingestion_health() detects the run that did NOT happen; /api/v1/health returns 503 out-of-band because a scheduler cannot detect its own failure to run. Migration 016 splits NEVER_RAN from NEVER_SUCCEEDED. 134 tests. |
 | 2026-09-11 | 10-11 | **API and UI running locally.** 4 versioned routes, screener with as-of control, provenance to the SEC document, freshness on every response. Read-only enforced by the ii_web database role. 40 contract checks. |
 | 2026-09-11 | 9 | **Screening works.** 9 metrics, point-in-time screens, provenance to the SEC document. 118 tests. Migration 014 fixes a fail-closed universe bug: every screen returned zero because universe_as_of required lifecycle events the adapter never ingests. |
