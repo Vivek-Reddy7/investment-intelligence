@@ -280,6 +280,60 @@ tolerate two seconds. A user filtering today's universe will not.
 8.6 — "NIFTY 500" is a time-varying set, and a point-in-time screen needs the
 membership that applied on that date.
 
+## 2.13 Revision: consequences of the Phase 3 licensing finding
+
+*Added 2026-09-11, following [03-data-sources.md](03-data-sources.md) §5.*
+
+Prices cannot be displayed publicly without a ₹1,10,000 licence per medium.
+Fundamentals can, because companies publish them themselves under SEBI LODR.
+That inverts which data is central.
+
+**The component set does not change. Their roles do.**
+
+| Component | Was | Now |
+|---|---|---|
+| §2.4 Fundamentals worker | One of three ingesters | **The primary ingester.** Everything public depends on it |
+| §2.4 Price worker | Primary ingester | **Moves to the private path.** No public price ingestion in v1 |
+| §2.6 Price adjustment | Core computation | **Deferred to Phase 21.** Nothing to adjust while prices are private |
+| §2.7 Derived metrics | Valuation, profitability, leverage, growth | **Profitability, leverage, growth, cash conversion only.** Valuation needs prices |
+| §2.1 Index membership | Ingested from a source | **Cannot be sourced** — see below |
+| §2.11 Private broker path | Deferred nicety | **Now where all price-derived analysis lives** |
+
+### Universe definition without index data
+
+Decision 8.6 chose NIFTY 500, and historical constituents turn out to sit
+under NSE's index licensing. So "NIFTY 500 as of March 2023" is not
+obtainable, and a point-in-time screen cannot filter on index membership.
+
+The fallback, already anticipated in 8.6, becomes the actual design:
+
+- **The tracked set** is seeded from the current NIFTY 500 — a convenient,
+  defensible choice of which ~500 companies to ingest filings for. It is a
+  configuration input, not a queryable fact.
+- **Point-in-time universe membership** is derived from our own data: a
+  company is in the universe as of date *D* if it had filed a statement on or
+  before *D* and had not delisted by *D*.
+
+This is weaker than true index reconstruction, and the difference should be
+stated in the UI rather than hidden. It is also free of survivorship bias in
+the way that matters: a company we track that later delists stays in the
+historical universe.
+
+### Corporate actions are demoted, not removed
+
+Without public prices there is nothing to split-adjust. But companies restate
+**per-share figures** after splits and bonuses, so EPS and book-value-per-share
+across a split boundary still need the action to be interpretable. Corporate
+actions stay in the model at lower priority, sourced from statutory
+disclosures rather than a market data feed.
+
+### What this does to the invariants
+
+None change. Invariant 7 (private-path data never writes to the core store)
+becomes considerably more load-bearing, because the private path now carries
+prices rather than a convenience feature — and a price leaking into the public
+store is now a licensing violation, not just an architectural smell.
+
 ## 3. Invariants
 
 The rules that keep the system honest. Any one of these being violated is a

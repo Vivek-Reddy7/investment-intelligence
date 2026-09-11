@@ -82,7 +82,7 @@ our first ingestion.
 source is adopted on recollection. A primary and a fallback are identified for
 prices, fundamentals, corporate actions, and index membership.
 
-### Phase 4 — System architecture · **DRAFTED, revise after 3**
+### Phase 4 — System architecture · **DONE**
 **Build:** Component boundaries, data flow, invariants, failure modes.
 **Why:** Separating ingestion, computation and serving onto different clocks
 is what makes this survivable on free infrastructure. If a page load could
@@ -91,16 +91,18 @@ site down.
 **Deliverable:** [`docs/02-architecture.md`](docs/02-architecture.md) — 11
 components, 12 invariants, 10 failure modes, no technology named.
 **Exit:** Invariants agreed (they become review rules). Every v1 feature has a
-home. Revised for whatever phase 3 discovers.
+home. Revised in §2.13 for the Phase 3 licensing finding — component set
+unchanged, roles inverted: fundamentals become the primary ingester, prices
+move to the private path.
 
-### Phase 5 — Technology stack
+### Phase 5 — Technology stack · **IN PROGRESS, ADR 006 open**
 **Build:** Language, framework, datastore, scheduler, host, frontend
 framework — each chosen deliberately.
 **Why:** Free-tier constraints and bitemporal querying narrow the field more
 than usual. A datastore that cannot express "latest version as of date X"
 efficiently makes the core feature slow.
-**Deliverable:** `docs/adr/` — one ADR per decision, each naming the
-alternative it beat and the condition under which we would revisit.
+**Deliverable:** [`docs/05-technology-stack.md`](docs/05-technology-stack.md) —
+six ADRs, each naming the alternative it beat and the revisit condition.
 **Exit:** Every choice is an ADR, not a preference. Free-tier limits of each
 chosen service are written down with numbers.
 
@@ -318,3 +320,5 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | NSE tariffs verified: public display of EOD market data ₹1,10,000 per medium, 15-min delayed ₹60,000, no delay makes it free. |
 | 2026-09-11 | 3 | NSE data policy read in full. Non-commercial waiver requires a confidentiality declaration — closed. Clause 7.4 bans simulation/virtual trading outright, at any price. |
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
+| 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
+| 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
