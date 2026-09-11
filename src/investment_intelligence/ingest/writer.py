@@ -47,15 +47,26 @@ class WriteResult:
 
 
 class UnknownInstrument(KeyError):
-    """An ISIN we do not track. Not an error to swallow silently."""
+    """An identifier we do not track. Not an error to swallow silently."""
 
 
-def resolve_isin(conn: psycopg.Connection, isin: str) -> int:
+def resolve_ref(conn: psycopg.Connection, scheme: str, value: str) -> int:
+    """Map a source's own identifier to our internal instrument_id.
+
+    Architecture §2.1: nothing downstream ever sees a provider's key. The
+    mapping is a stored, sourced fact (`instrument_external_ids`) rather than
+    a string transformation, because guessing at identity is how two
+    companies' histories get merged.
+    """
     with conn.cursor() as cur:
-        cur.execute("SELECT instrument_id FROM instruments WHERE isin = %s", (isin,))
+        cur.execute(
+            "SELECT instrument_id FROM instrument_external_ids "
+            "WHERE scheme = %s AND value = %s",
+            (scheme, value),
+        )
         row = cur.fetchone()
     if row is None:
-        raise UnknownInstrument(isin)
+        raise UnknownInstrument(f"{scheme}={value}")
     return row[0]
 
 
@@ -116,6 +127,7 @@ WITH latest AS (
       AND  fiscal_year   = %(fiscal_year)s
       AND  period_type   = %(period_type)s
       AND  line_item     = %(line_item)s
+      AND  currency      = %(currency)s
     ORDER  BY known_from DESC
     LIMIT  1
 )
@@ -168,11 +180,32 @@ def write_filing(
     doc: FilingDocument,
     *,
     source_id: str,
-    known_from: datetime,
+    key_scheme: str,
+    known_from: datetime | None = None,
     run_id: int | None = None,
 ) -> WriteResult:
-    """Write a filing and its facts. Safe to call repeatedly with the same input."""
-    instrument_id = resolve_isin(conn, doc.isin)
+    """Write a filing and its facts. Safe to call repeatedly with the same input.
+
+    `known_from` defaults to the filing's own `filed_at`, and that default is
+    the important part.
+
+    Transaction time means "when could this have been known", not "when did we
+    happen to look". EDGAR tells us the date each claim entered the public
+    record, so using it makes a point-in-time query truthful. An earlier
+    version stamped every document in a run with the ingestion timestamp
+    instead, which collapsed the transaction-time axis: FY2018 revenue as
+    reported in 2019 and as restated in 2021 both became "known from today",
+    so they were the same fact at the same instant and the second one
+    collided. Had the unique constraint not caught it, the wedge would have
+    been silently gone -- every historical query would have returned today's
+    view.
+
+    The override exists only for sources that genuinely cannot date their own
+    claims, where ingestion time is the best available answer and should be
+    recorded as such.
+    """
+    known_from = known_from or doc.filed_at
+    instrument_id = resolve_ref(conn, key_scheme, doc.instrument_ref)
     filing_id, was_new = _upsert_filing(conn, instrument_id, doc, source_id, run_id)
 
     result = WriteResult(

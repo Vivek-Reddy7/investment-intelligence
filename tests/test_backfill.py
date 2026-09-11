@@ -42,7 +42,7 @@ def revenue(value: str, *, fy: int = 2026, period: str = "Q2") -> ReportedFact:
 def document(isin: str, *facts: ReportedFact, ref: str = "doc-1",
              hash_: str = "h1") -> FilingDocument:
     return FilingDocument(
-        isin=isin, filing_type="QUARTERLY_RESULT", period_end=date(2026, 9, 30),
+        instrument_ref=isin, filing_type="QUARTERLY_RESULT", period_end=date(2026, 9, 30),
         filed_at=KNOWN, source_ref=ref, content_hash=hash_, facts=facts,
     )
 
@@ -60,9 +60,16 @@ def universe(committed_conn, source_committed):
                 "INSERT INTO instruments (isin) VALUES (%s) RETURNING instrument_id",
                 (isin,),
             )
+            iid = cur.fetchone()[0]
             cur.execute(
-                "INSERT INTO tracked_instruments (instrument_id) VALUES (%s)",
-                (cur.fetchone()[0],),
+                "INSERT INTO tracked_instruments (instrument_id) VALUES (%s)", (iid,)
+            )
+            # Sources address instruments by their own identifier scheme
+            # (base.FilingSource.key_scheme), never by ours.
+            cur.execute(
+                "INSERT INTO instrument_external_ids (instrument_id, scheme, value, "
+                "source_id) VALUES (%s, 'SEC_CIK', %s, %s)",
+                (iid, isin, source_committed),
             )
     return isins
 
@@ -106,8 +113,8 @@ def test_writing_the_same_value_twice_creates_one_version(committed_conn, fixtur
     isin = universe[0]
     doc = document(isin, revenue("1000"))
 
-    first = write_filing(conn, doc, source_id="FIXTURE", known_from=KNOWN)
-    second = write_filing(conn, doc, source_id="FIXTURE", known_from=LATER)
+    first = write_filing(conn, doc, source_id="FIXTURE", key_scheme="SEC_CIK", known_from=KNOWN)
+    second = write_filing(conn, doc, source_id="FIXTURE", key_scheme="SEC_CIK", known_from=LATER)
 
     assert first.facts_written == 1
     assert second.facts_written == 0
@@ -121,9 +128,9 @@ def test_writing_a_changed_value_creates_a_second_version(committed_conn, fixtur
     conn = committed_conn
     isin = universe[0]
     write_filing(conn, document(isin, revenue("1000")),
-                 source_id="FIXTURE", known_from=KNOWN)
+                 source_id="FIXTURE", key_scheme="SEC_CIK", known_from=KNOWN)
     write_filing(conn, document(isin, revenue("900"), ref="doc-2", hash_="h2"),
-                 source_id="FIXTURE", known_from=LATER)
+                 source_id="FIXTURE", key_scheme="SEC_CIK", known_from=LATER)
 
     assert _versions(conn, isin) == [Decimal("1000"), Decimal("900")]
 
@@ -136,15 +143,15 @@ def test_a_value_reverting_creates_a_third_version(committed_conn, fixture_sourc
     for value, ref, when in (("1000", "d1", KNOWN), ("900", "d2", LATER),
                              ("1000", "d3", datetime(2027, 6, 1, tzinfo=timezone.utc))):
         write_filing(conn, document(isin, revenue(value), ref=ref, hash_=ref),
-                     source_id="FIXTURE", known_from=when)
+                     source_id="FIXTURE", key_scheme="SEC_CIK", known_from=when)
     assert _versions(conn, isin) == [Decimal("1000"), Decimal("900"), Decimal("1000")]
 
 
 def test_the_same_document_refetched_is_one_filing(committed_conn, fixture_source, universe):
     conn = committed_conn
     doc = document(universe[0], revenue("1000"))
-    assert write_filing(conn, doc, source_id="FIXTURE", known_from=KNOWN).filings_written == 1
-    again = write_filing(conn, doc, source_id="FIXTURE", known_from=LATER)
+    assert write_filing(conn, doc, source_id="FIXTURE", key_scheme="SEC_CIK", known_from=KNOWN).filings_written == 1
+    again = write_filing(conn, doc, source_id="FIXTURE", key_scheme="SEC_CIK", known_from=LATER)
     assert again.filings_written == 0
     assert again.filings_seen_before == 1
 
@@ -232,7 +239,7 @@ def test_a_crash_mid_instrument_is_safe_to_retry(committed_conn, fixture_source,
     conn = committed_conn
     isin = universe[0]
     write_filing(conn, document(isin, revenue("1000")),
-                 source_id="FIXTURE", known_from=KNOWN)
+                 source_id="FIXTURE", key_scheme="SEC_CIK", known_from=KNOWN)
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO backfill_checkpoints (job, instrument_id, state) "
@@ -278,7 +285,7 @@ def test_rejected_documents_are_counted_not_imputed(committed_conn, fixture_sour
     conn = committed_conn
     isin = universe[0]
     fixture_source.documents[isin] = [
-        Rejection(isin=isin, detail="Q2 revenue", reason="value was null in filing"),
+        Rejection(instrument_ref=isin, detail="Q2 revenue", reason="value was null in filing"),
         document(isin, revenue("1000")),
     ]
     report = backfill.run(conn, fixture_source, job="j", since=SINCE, until=UNTIL)
@@ -386,7 +393,7 @@ def test_an_unknown_basis_is_refused():
 def test_a_filing_without_provenance_is_refused():
     with pytest.raises(InvalidFact, match="source_ref"):
         FilingDocument(
-            isin="INE000TEST01", filing_type="QUARTERLY_RESULT",
+            instrument_ref="INE000TEST01", filing_type="QUARTERLY_RESULT",
             period_end=date(2026, 9, 30), filed_at=KNOWN,
             source_ref="", content_hash="h",
         )
@@ -397,7 +404,7 @@ def test_a_naive_filing_timestamp_is_refused():
     happen, and known_from ordering is what the whole product rests on."""
     with pytest.raises(InvalidFact, match="timezone-aware"):
         FilingDocument(
-            isin="INE000TEST01", filing_type="QUARTERLY_RESULT",
+            instrument_ref="INE000TEST01", filing_type="QUARTERLY_RESULT",
             period_end=date(2026, 9, 30), filed_at=datetime(2026, 10, 14),
             source_ref="r", content_hash="h",
         )

@@ -124,7 +124,7 @@ explaining each time axis.
 returns correct results against hand-seeded test data including a restatement
 and a delisting.
 
-### Phase 7 — Ingestion: backfill · **ENGINE DONE, BLOCKED ON A SOURCE**
+### Phase 7 — Ingestion: backfill · **DONE for stage one**
 **Build:** Bulk historical load for the NIFTY 500 universe under provider rate
 limits, resumable after interruption.
 **Why:** Backfill is a different problem from the daily job: it runs for
@@ -322,6 +322,7 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
 | 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
 | 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
+| 2026-09-11 | 7 | **SEC EDGAR loaded.** 2,393 facts, 118 filings, 9/10 companies, re-run a verified no-op. Natively bitemporal, explicitly reusable. Wedge verified on real data incl. a Rs 2bn Sify restatement across two filings. Four invisible bugs found by live data; see 07-first-source.md §4. |
 | 2026-09-11 | 3 | Commercial fundamentals APIs priced and terms read (03a). No off-the-shelf plan grants public display. Separately, none serve as-reported figures — so paying buys a conventional screener, not the wedge. |
 | 2026-09-11 | 7 | Backfill engine built: adapter interface, boundary validation, idempotent versioned writer, resumable checkpointed backfill. 69 tests. **Blocked on a source**: official BSE/NSE filings APIs are ~Rs 20 lakh/year, unofficial scrapers are excluded by instruction. See 03-data-sources.md §6. |
 | 2026-09-11 | 6 | Schema built: 9 forward-only migrations, 46 tests. Append-only enforced by triggers and privileges. **Found and closed a TRUNCATE hole** — BEFORE DELETE triggers do not catch TRUNCATE, so the table could be emptied with enforcement in place, silently. |

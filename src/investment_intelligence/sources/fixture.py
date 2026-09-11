@@ -30,23 +30,24 @@ class FixtureSource:
     """
 
     source_id: str = "FIXTURE"
+    key_scheme: str = "SEC_CIK"
     documents: dict[str, list[FilingDocument | Rejection]] = field(default_factory=dict)
     fail_on: set[str] = field(default_factory=set)
     on_fetch: Callable[[str], None] | None = None
     calls: list[str] = field(default_factory=list)
 
     def fetch_filings(
-        self, isin: str, since: date, until: date
+        self, ref: str, since: date, until: date
     ) -> Iterator[FilingDocument | Rejection]:
-        self.calls.append(isin)
+        self.calls.append(ref)
 
         if self.on_fetch is not None:
-            self.on_fetch(isin)
+            self.on_fetch(ref)
 
-        if isin in self.fail_on:
-            raise ConnectionError(f"simulated provider failure for {isin}")
+        if ref in self.fail_on:
+            raise ConnectionError(f"simulated provider failure for {ref}")
 
-        for item in self.documents.get(isin, []):
+        for item in self.documents.get(ref, []):
             if isinstance(item, Rejection):
                 yield item
             elif since <= item.period_end <= until:

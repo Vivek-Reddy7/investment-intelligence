@@ -45,6 +45,15 @@ class ReportedFact:
     period_end: date
     currency: str = "INR"
 
+    # A balance is an instant, not a span: total assets "as at 31 March" is not
+    # a quantity that accumulated over the year the way revenue did. The
+    # distinction already exists in the schema as `line_items.is_flow`, and it
+    # had to exist here too the moment real EDGAR data arrived -- XBRL gives
+    # balance-sheet facts no start date at all. Without this, every
+    # balance-sheet item was being silently dropped, which would have quietly
+    # removed leverage from the metric set.
+    is_instant: bool = False
+
     def __post_init__(self) -> None:
         if self.basis not in BASES:
             raise InvalidFact(f"basis must be one of {sorted(BASES)}, got {self.basis!r}")
@@ -69,9 +78,22 @@ class ReportedFact:
         if len(self.currency) != 3:
             raise InvalidFact(f"currency must be a 3-letter code, got {self.currency!r}")
 
+        span_days = (self.period_end - self.period_start).days
+
+        if self.is_instant:
+            # An instant carries the date it was measured, twice. Attaching it
+            # to a period (fiscal_year + period_type) is what lets a reader ask
+            # for "FY2019 total assets" and get the balance as at the FY2019
+            # year end, which is where they expect to find it.
+            if span_days != 0:
+                raise InvalidFact(
+                    f"an instant must have period_start == period_end, "
+                    f"got a {span_days}-day span"
+                )
+            return
+
         # A period label that disagrees with its own dates means the adapter
         # mapped something wrongly, and every downstream metric inherits it.
-        span_days = (self.period_end - self.period_start).days
         expected = {
             "Q1": (80, 100), "Q2": (80, 100), "Q3": (80, 100), "Q4": (80, 100),
             "H1": (170, 195), "H2": (170, 195),
@@ -92,7 +114,7 @@ class FilingDocument:
     `source_ref` is where it came from, so provenance survives to the UI.
     """
 
-    isin: str
+    instrument_ref: str          # value of the source's key_scheme identifier
     filing_type: str
     period_end: date
     filed_at: datetime
@@ -101,6 +123,8 @@ class FilingDocument:
     facts: tuple[ReportedFact, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
+        if not self.instrument_ref:
+            raise InvalidFact("instrument_ref is required")
         if not self.source_ref:
             raise InvalidFact("source_ref is required: a fact with no provenance is unusable")
         if not self.content_hash:
@@ -118,7 +142,7 @@ class Rejection:
     way to notice is to count.
     """
 
-    isin: str
+    instrument_ref: str
     detail: str
     reason: str
 
@@ -135,8 +159,15 @@ class FilingSource(Protocol):
 
     source_id: str
 
+    # Which identifier scheme this source speaks. EDGAR knows companies by
+    # SEC_CIK; an Indian filings adapter would use ISIN or NSE_SYMBOL. The
+    # engine looks the instrument up in `instrument_external_ids` under this
+    # scheme, so no adapter needs database access and no adapter has to care
+    # what the others use.
+    key_scheme: str
+
     def fetch_filings(
-        self, isin: str, since: date, until: date
+        self, ref: str, since: date, until: date
     ) -> Iterator[FilingDocument | Rejection]:
         """Filings for one instrument in a window.
 

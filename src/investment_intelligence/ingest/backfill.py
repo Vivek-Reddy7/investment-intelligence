@@ -105,8 +105,8 @@ def plan(conn: psycopg.Connection, job: str) -> int:
         return cur.rowcount
 
 
-def outstanding(conn: psycopg.Connection, job: str) -> list[tuple[int, str]]:
-    """Work still to do, as (instrument_id, isin).
+def outstanding(conn: psycopg.Connection, job: str, scheme: str) -> list[tuple[int, str]]:
+    """Work still to do, as (instrument_id, external ref in `scheme`).
 
     IN_PROGRESS is included: it means a previous run died mid-instrument, and
     retrying is safe because the writes are idempotent. Trusting an
@@ -115,14 +115,15 @@ def outstanding(conn: psycopg.Connection, job: str) -> list[tuple[int, str]]:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT c.instrument_id, i.isin
+            SELECT c.instrument_id, x.value
             FROM   backfill_checkpoints c
-            JOIN   instruments i USING (instrument_id)
+            JOIN   instrument_external_ids x
+                     ON x.instrument_id = c.instrument_id AND x.scheme = %s
             WHERE  c.job = %s
               AND  c.state IN ('PENDING', 'IN_PROGRESS', 'FAILED')
             ORDER  BY c.attempts, c.instrument_id
             """,
-            (job,),
+            (scheme, job),
         )
         return cur.fetchall()
 
@@ -184,7 +185,6 @@ def run(
     until: date,
     limiter: RateLimiter | None = None,
     max_instruments: int | None = None,
-    now: datetime | None = None,
 ) -> BackfillReport:
     """Backfill outstanding instruments. Resume by calling again.
 
@@ -193,18 +193,17 @@ def run(
     the next invocation picks up where it stopped.
     """
     limiter = limiter or RateLimiter(0.0)
-    known_from = now or datetime.now(timezone.utc)
     report = BackfillReport(job=job)
 
     plan(conn, job)
-    work = outstanding(conn, job)
+    work = outstanding(conn, job, source.key_scheme)
     if max_instruments is not None:
         work = work[:max_instruments]
 
     report.run_id = _start_run(conn, source.source_id, since, until)
     conn.commit()
 
-    for instrument_id, isin in work:
+    for instrument_id, ref in work:
         _mark(conn, job, instrument_id, "IN_PROGRESS")
         conn.commit()
 
@@ -214,14 +213,16 @@ def run(
             limiter.wait()
             saw_document = False
 
-            for item in source.fetch_filings(isin, since, until):
+            for item in source.fetch_filings(ref, since, until):
                 if isinstance(item, Rejection):
                     rejected.append(item)
                     continue
                 saw_document = True
+                # No known_from: the writer uses the filing's own filed_at,
+                # which is the real transaction time. See writer.write_filing.
                 result = write_filing(
                     conn, item, source_id=source.source_id,
-                    known_from=known_from, run_id=report.run_id,
+                    key_scheme=source.key_scheme, run_id=report.run_id,
                 )
                 report.writes = report.writes + result
                 written += result.facts_written
@@ -241,7 +242,7 @@ def run(
 
         except UnknownInstrument as exc:
             conn.rollback()
-            _mark(conn, job, instrument_id, "FAILED", error=f"unknown ISIN: {exc}")
+            _mark(conn, job, instrument_id, "FAILED", error=f"unknown instrument: {exc}")
             report.instruments_failed += 1
             conn.commit()
 
@@ -250,7 +251,7 @@ def run(
             # one company must not abandon the other 499; the checkpoint
             # records the failure so a later run retries just this one.
             conn.rollback()
-            log.warning("backfill failed for %s: %s", isin, exc)
+            log.warning("backfill failed for %s: %s", ref, exc)
             _mark(conn, job, instrument_id, "FAILED", error=f"{type(exc).__name__}: {exc}")
             report.instruments_failed += 1
             conn.commit()
@@ -260,7 +261,7 @@ def run(
     return report
 
 
-def gaps(conn: psycopg.Connection, job: str) -> dict[str, list[str]]:
+def gaps(conn: psycopg.Connection, job: str, scheme: str = 'SEC_CIK') -> dict[str, list[str]]:
     """What the backfill did not load, enumerated rather than hidden.
 
     The Phase 7 exit criterion says gaps are enumerated, not hidden. A
@@ -271,15 +272,18 @@ def gaps(conn: psycopg.Connection, job: str) -> dict[str, list[str]]:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT c.state, i.isin, c.last_error
+            SELECT c.state, coalesce(i.isin, x.value), c.last_error
             FROM   backfill_checkpoints c
             JOIN   instruments i USING (instrument_id)
+            LEFT   JOIN instrument_external_ids x
+                     ON x.instrument_id = c.instrument_id
+                    AND x.scheme = %s
             WHERE  c.job = %s AND c.state <> 'DONE'
-            ORDER  BY c.state, i.isin
+            ORDER  BY c.state, 2
             """,
-            (job,),
+            (scheme, job),
         )
         out: dict[str, list[str]] = {}
-        for state, isin, error in cur.fetchall():
-            out.setdefault(state, []).append(isin if not error else f"{isin} ({error})")
+        for state, ref, error in cur.fetchall():
+            out.setdefault(state, []).append(ref if not error else f"{ref} ({error})")
         return out
