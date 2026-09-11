@@ -22,6 +22,9 @@ from investment_intelligence.sources.base import Rejection
 # Deliberately a small, readable list rather than a clever generic normaliser.
 # A wrong class silently merges two problems into one line of a report.
 _CLASSES: list[tuple[str, re.Pattern[str]]] = [
+    # A deliberate decision, not a parser gap. Listed first because the YTD
+    # reason also mentions periods and would otherwise fall to a later rule.
+    ("YTD_NOT_STORED",           re.compile(r"year-to-date period not stored")),
     ("UNPLACEABLE_BALANCE_DATE", re.compile(r"balance date matches no reported period")),
     ("UNRECOGNISED_PERIOD_SPAN", re.compile(r"unrecognised period span")),
     ("AMBIGUOUS_QUARTER",        re.compile(r"cannot say which quarter", re.I)),

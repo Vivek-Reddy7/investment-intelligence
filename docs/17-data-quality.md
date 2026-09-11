@@ -102,6 +102,18 @@ UNPLACEABLE_BALANCE_DATE       5  across  5 instruments
 SOURCE_UNAVAILABLE             1  across  1 instrument
 ```
 
+**Update, 2026-09-11.** Both parser gaps below were then fixed, and the report
+now reads:
+
+```
+YTD_NOT_STORED               151  across  1 instrument
+UNPLACEABLE_BALANCE_DATE       5  across  5 instruments
+SOURCE_UNAVAILABLE             1  across  1 instrument
+```
+
+215 facts recovered, and the 151 reclassified from a parse failure to a
+deliberate decision. Actual failures: six. See [§8](#8-what-the-classification-led-to).
+
 **366 of 372 rejections come from two companies.** Before classification "372
 rejections" read as a broad data-quality problem. It is one narrow parser gap.
 Digging in gives the precise diagnosis:
@@ -178,3 +190,42 @@ itself two phases later.
       boundary validation
 - [ ] Corporate-action discontinuity detection — deferred, no data to check
       against
+
+---
+
+## 8. What the classification led to
+
+Naming the rejection classes was the whole return on this phase. Two of the
+three classes turned out to be one parser gap and one unstated decision, and
+both were fixed within the day:
+
+**~215 quarters recovered.** Spans of 89–91 days matched the quarterly band
+and were rejected anyway, because the code asked EDGAR's `fp` field which
+quarter it was and `fp` frequently reads `FY` on a quarterly fact. The quarter
+is a deterministic function of the period end and the company's fiscal year
+end, so it is now derived. The store went from **zero** non-annual facts to
+551.
+
+**The fiscal calendar is now learned per company.** `_fiscal_year` assumed a
+31 March year end, correct for the Indian filers and wrong for Genpact, a
+December filer — so every one of its fiscal-year labels and quarter numbers
+was wrong. The year end is now taken from the most common annual period
+ending in the company's own data, because the data already states it and a
+config field is one more thing to go stale.
+
+**151 YTD periods reclassified, not recovered.** US 10-Q filers report
+cumulative nine-month figures. Storing those beside the quarters they contain
+would double-count in any aggregate, and quarterly is the finer grain — YTD is
+derivable from quarters, not the reverse. So they are still skipped, but now
+with their own reason and class (`YTD_NOT_STORED`), because *"we chose not
+to"* and *"we could not parse it"* should never appear in a report as the same
+thing.
+
+**The `UNCLASSIFIED` bucket caught my own omission.** Adding the new YTD
+rejection reason without a matching classification rule put 151 rows into
+`UNCLASSIFIED` on the next run — which is exactly the failure that bucket
+exists to make visible, arriving one commit after it was built.
+
+One consequence worth watching: `INCOMPLETE_PERIOD` went from 0 findings to
+25, because quarterly periods frequently carry revenue without a profit
+figure. That is the check working on newly visible data, not a regression.

@@ -16,7 +16,9 @@ from pathlib import Path
 import pytest
 
 from investment_intelligence.sources.base import FilingDocument, InvalidFact, Rejection, ReportedFact
-from investment_intelligence.sources.edgar import EdgarSource, _fiscal_year, _period_type
+from investment_intelligence.sources.edgar import (
+    EdgarSource, _fiscal_calendar, _fiscal_year, _period_type, _quarter,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "edgar_infy.json"
 INFY_REF = "1067491"   # SEC CIK, the scheme EdgarSource speaks
@@ -62,19 +64,55 @@ def test_fiscal_year_comes_from_the_period_not_the_filing(payload):
     for entries in revenue["units"].values():
         for entry in entries:
             end = date.fromisoformat(entry["end"])
-            if entry.get("fy") and entry["fy"] != _fiscal_year(end):
+            if entry.get("fy") and entry["fy"] != _fiscal_year(end, 3):
                 disagreements += 1
     assert disagreements > 0, "EDGAR's fy agreed with ours everywhere; check the fixture"
 
 
-@pytest.mark.parametrize("period_end,expected", [
-    (date(2019, 3, 31), 2019),   # Indian FY ends 31 March
-    (date(2020, 3, 31), 2020),
-    (date(2019, 12, 31), 2020),  # Dec sits in the FY ending next March
-    (date(2019, 6, 30), 2020),
+@pytest.mark.parametrize("period_end,fye_month,expected", [
+    # A March filer: the Indian companies.
+    (date(2019, 3, 31), 3, 2019),
+    (date(2020, 3, 31), 3, 2020),
+    (date(2019, 12, 31), 3, 2020),  # Dec sits in the FY ending next March
+    (date(2019, 6, 30), 3, 2020),
+    # A December filer: Genpact. Assuming March here labelled every one of its
+    # periods wrongly, which is why the calendar is derived per company.
+    (date(2019, 12, 31), 12, 2019),
+    (date(2019, 3, 31), 12, 2019),
+    (date(2019, 6, 30), 12, 2019),
 ])
-def test_fiscal_year_boundary(period_end, expected):
-    assert _fiscal_year(period_end) == expected
+def test_fiscal_year_boundary(period_end, fye_month, expected):
+    assert _fiscal_year(period_end, fye_month) == expected
+
+
+@pytest.mark.parametrize("period_end,fye_month,expected", [
+    # March year end
+    (date(2019, 6, 30), 3, "Q1"),
+    (date(2019, 9, 30), 3, "Q2"),
+    (date(2019, 12, 31), 3, "Q3"),
+    (date(2020, 3, 31), 3, "Q4"),
+    # December year end
+    (date(2019, 3, 31), 12, "Q1"),
+    (date(2019, 6, 30), 12, "Q2"),
+    (date(2019, 9, 30), 12, "Q3"),
+    (date(2019, 12, 31), 12, "Q4"),
+])
+def test_quarter_is_derived_not_taken_from_the_fp_hint(period_end, fye_month, expected):
+    """EDGAR's `fp` frequently reads `FY` on a quarterly fact, which is why
+    ~215 genuine quarters were rejected in Phase 7 despite matching the span
+    band. The quarter is a deterministic function of the period end and the
+    fiscal year end, so it is derived."""
+    assert _quarter(period_end, fye_month) == expected
+
+
+def test_the_fiscal_calendar_is_learned_from_the_data(payload):
+    """Infosys files to a 31 March year end, and the payload says so without
+    anyone configuring it."""
+    assert _fiscal_calendar(payload) == (3, 31)
+
+
+def test_an_unknown_calendar_falls_back_to_march(payload):
+    assert _fiscal_calendar({"facts": {}}) == (3, 31)
 
 
 def test_one_identity_per_economic_period_across_filings(documents):
@@ -215,18 +253,34 @@ def test_per_share_and_ratio_units_do_not_become_money(documents):
 # Period labelling
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("start,end,fp,expected", [
-    (date(2019, 4, 1), date(2020, 3, 31), "FY", "ANNUAL"),
-    (date(2019, 7, 1), date(2019, 9, 30), "Q2", "Q2"),
-    (date(2019, 4, 1), date(2019, 9, 30), "Q2", "H1"),
-    (date(2019, 7, 1), date(2019, 9, 30), "FY", None),   # quarter, unknown which
-    (date(2019, 1, 1), date(2019, 5, 15), "FY", None),   # 134 days: no band
+@pytest.mark.parametrize("start,end,fye,expected", [
+    (date(2019, 4, 1), date(2020, 3, 31), 3, "ANNUAL"),
+    (date(2019, 7, 1), date(2019, 9, 30), 3, "Q2"),
+    (date(2019, 4, 1), date(2019, 9, 30), 3, "H1"),
+    # A quarter with no usable `fp` hint now resolves, where it used to be
+    # discarded. This is the ~215 recovered facts, as a test.
+    (date(2019, 10, 1), date(2019, 12, 31), 3, "Q3"),
+    (date(2019, 1, 1), date(2019, 5, 15), 3, None),   # 134 days: no band
 ])
-def test_period_labelling(start, end, fp, expected):
-    assert _period_type(start, end, fp) == expected
+def test_period_labelling(start, end, fye, expected):
+    assert _period_type(start, end, fye) == expected
 
 
 def test_an_unrecognised_span_is_rejected_rather_than_guessed():
     """A 134-day "quarter" means the adapter misread something, and every
     growth and margin metric computed from it inherits the error."""
-    assert _period_type(date(2019, 1, 1), date(2019, 5, 15), "Q1") is None
+    assert _period_type(date(2019, 1, 1), date(2019, 5, 15), 3) is None
+
+
+def test_a_nine_month_ytd_period_is_deliberately_not_stored():
+    """A DECISION, not a parser gap.
+
+    US 10-Q filers report cumulative year-to-date figures. Storing a
+    nine-month total beside the three quarters it contains would double-count
+    in any aggregate, and quarterly is the finer grain -- YTD is derivable
+    from quarters, not the reverse.
+
+    Reporting this as "unrecognised" made 151 deliberate skips look like 151
+    failures in the Phase 17 rejection report, so it carries its own reason.
+    """
+    assert _period_type(date(2019, 1, 1), date(2019, 9, 30), 12) is None

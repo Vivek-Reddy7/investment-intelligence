@@ -205,7 +205,7 @@ export default async function Screener({
         Figures are as filed with the SEC under IFRS or US-GAAP, not the Ind AS
         numbers filed in India — so they will not match Indian screeners.
         Coverage is the Indian companies that file with the SEC, which is a
-        small set. Annual periods only.
+        small set. Mostly annual periods, with some quarterly.
       </p>
     </>
   );

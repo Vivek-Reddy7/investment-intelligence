@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
@@ -113,14 +114,53 @@ MONEY_UNITS = frozenset({"INR", "USD", "EUR", "GBP"})
 # EDGAR reports a period as a span; we label it. Anything that does not fall in
 # a recognised band is rejected rather than guessed at, because a mislabelled
 # period propagates into every growth and margin metric computed from it.
+#
+# The nine-month band is listed and deliberately NOT ingested -- see
+# _period_type. US 10-Q filers report cumulative year-to-date figures, and
+# storing those beside the quarters they contain would double-count in any
+# aggregate. Naming the band lets us distinguish "we chose not to" from "we
+# could not parse it", which was 151 of the 372 Phase 7 rejections.
 _SPANS = (
-    (80, 100, "Q"),
-    (170, 195, "H"),
+    (80, 100, "QUARTER"),
+    (170, 195, "HALF"),
+    (260, 285, "NINE_MONTH"),
     (350, 400, "ANNUAL"),
 )
 
+DEFAULT_FISCAL_YEAR_END = (3, 31)   # Indian listed companies
 
-def _fiscal_year(period_end: date) -> int:
+
+def _fiscal_calendar(payload: dict) -> tuple[int, int]:
+    """Learn a company's fiscal year end from its own annual periods.
+
+    Assuming 31 March was correct for the Indian filers and wrong for
+    Genpact, a US domestic registrant with a December year end -- so every
+    fiscal-year label and every quarter number for that company was wrong.
+
+    Derived rather than configured: the data already states it, and a
+    per-company config field is one more thing to get out of date. Takes the
+    most common (month, day) across annual period ends, because a 52/53-week
+    filer's year end drifts by a few days.
+    """
+    endings: Counter[tuple[int, int]] = Counter()
+    for taxonomy, concepts in payload.get("facts", {}).items():
+        if taxonomy not in CONCEPTS:
+            continue
+        for concept in concepts.values():
+            for entries in concept.get("units", {}).values():
+                for entry in entries:
+                    if not entry.get("start"):
+                        continue
+                    start = date.fromisoformat(entry["start"])
+                    end = date.fromisoformat(entry["end"])
+                    if 350 <= (end - start).days <= 400:
+                        endings[(end.month, end.day)] += 1
+    if not endings:
+        return DEFAULT_FISCAL_YEAR_END
+    return endings.most_common(1)[0][0]
+
+
+def _fiscal_year(period_end: date, fye_month: int) -> int:
     """The fiscal year a period belongs to, derived from its own end date.
 
     NOT EDGAR's `fy` field. That is the fiscal year of the *report* the fact
@@ -133,26 +173,63 @@ def _fiscal_year(period_end: date) -> int:
     Nothing would look wrong. The store would just quietly hold three
     unrelated FY2019 revenues and `facts_as_of` would return all three.
 
-    Indian fiscal years end 31 March, so a period ending 2019-03-31 is FY2019.
-    A period ending in April-December belongs to the fiscal year ending the
-    following March.
+    A period ending on or before the fiscal year end month belongs to the
+    fiscal year named by its calendar year; one ending after it belongs to the
+    next. For a March filer, June 2019 is FY2020. For a December filer, every
+    month of 2019 is FY2019.
     """
-    return period_end.year if period_end.month <= 3 else period_end.year + 1
+    return period_end.year if period_end.month <= fye_month else period_end.year + 1
 
 
-def _period_type(start: date, end: date, fiscal_period: str | None) -> str | None:
-    """Label a span, using EDGAR's own `fp` hint to pick the quarter number."""
+def _quarter(period_end: date, fye_month: int) -> str:
+    """Which fiscal quarter a period ending here is.
+
+    EDGAR's `fp` field is unusable for this: it frequently reads `FY` on a
+    quarterly fact, which is why ~215 genuine quarters were rejected in Phase
+    7 despite matching the span band. The quarter is a deterministic function
+    of the period end and the fiscal year end, so deriving it is both more
+    reliable and more honest than trusting a hint.
+
+    For a March year end: Apr-Jun is Q1, Jan-Mar is Q4.
+    For a December year end: Jan-Mar is Q1, Oct-Dec is Q4.
+    """
+    offset = (period_end.month - fye_month - 1) % 12
+    return f"Q{offset // 3 + 1}"
+
+
+def _span_reason(start: date, end: date) -> str:
+    """Why a span was not stored. Two different situations, two reasons.
+
+    A nine-month year-to-date figure is a DECISION not to store overlapping
+    data. An unrecognised span is a parser gap. Reporting both as
+    "unrecognised" made 151 deliberate skips look like 151 failures in the
+    Phase 17 rejection report.
+    """
+    days = (end - start).days
+    if 260 <= days <= 285:
+        return ("year-to-date period not stored: overlaps the quarters it "
+                "contains, which would double-count in any aggregate")
+    return f"unrecognised period span of {days} days"
+
+
+def _period_type(start: date, end: date, fye_month: int) -> str | None:
+    """Label a span. Returns None for a span we deliberately do not store."""
     days = (end - start).days
     for low, high, kind in _SPANS:
         if low <= days <= high:
             if kind == "ANNUAL":
                 return "ANNUAL"
-            if kind == "H":
-                return "H1" if fiscal_period in (None, "Q2", "H1") else "H2"
-            # Quarterly: EDGAR's fp is Q1..Q4 or FY. Without a usable hint we
-            # cannot say which quarter, and guessing would be worse than
-            # skipping.
-            return fiscal_period if fiscal_period in ("Q1", "Q2", "Q3", "Q4") else None
+            if kind == "QUARTER":
+                return _quarter(end, fye_month)
+            if kind == "HALF":
+                # H1 ends at the half-year point; anything else is H2.
+                return "H1" if _quarter(end, fye_month) == "Q2" else "H2"
+            if kind == "NINE_MONTH":
+                # Deliberately not stored. A YTD figure overlaps the quarters
+                # it contains, so keeping both would double-count in any sum.
+                # Quarterly data is the finer grain and is derivable into YTD;
+                # the reverse is not true.
+                return None
     return None
 
 
@@ -227,7 +304,8 @@ class EdgarSource:
         # period this company has actually reported. Anything else is an
         # interim balance we cannot place, and it is rejected rather than
         # guessed at.
-        periods = self._flow_periods(payload)
+        fye_month, _ = _fiscal_calendar(payload)
+        periods = self._flow_periods(payload, fye_month)
 
         for taxonomy, concepts in payload.get("facts", {}).items():
             mapping = CONCEPTS.get(taxonomy)
@@ -248,7 +326,8 @@ class EdgarSource:
 
                     for entry in entries:
                         fact_or_rejection = self._to_fact(
-                            ref, line_item, currency, entry, since, until, periods
+                            ref, line_item, currency, entry, since, until,
+                            periods, fye_month
                         )
                         if fact_or_rejection is None:
                             continue
@@ -307,7 +386,7 @@ class EdgarSource:
             )
 
     @staticmethod
-    def _flow_periods(payload: dict) -> dict[date, tuple[int, str]]:
+    def _flow_periods(payload: dict, fye_month: int) -> dict[date, tuple[int, str]]:
         """Map each reported period END to its (fiscal_year, period_type).
 
         Built from flow facts only, because they are the ones that state their
@@ -325,18 +404,19 @@ class EdgarSource:
                             continue
                         start = date.fromisoformat(entry["start"])
                         end = date.fromisoformat(entry["end"])
-                        label = _period_type(start, end, entry.get("fp"))
+                        label = _period_type(start, end, fye_month)
                         if label is None:
                             continue
                         # ANNUAL wins where a date ends both a year and a
                         # quarter: a year-end balance sheet belongs to the year.
                         if label == "ANNUAL" or end not in out:
-                            out[end] = (_fiscal_year(end), label)
+                            out[end] = (_fiscal_year(end, fye_month), label)
         return out
 
     def _to_fact(
         self, ref: str, line_item: str, currency: str, entry: dict,
         since: date, until: date, periods: dict[date, tuple[int, str]],
+        fye_month: int,
     ) -> ReportedFact | Rejection | None:
         end = date.fromisoformat(entry["end"])
         if not since <= end <= until:
@@ -360,14 +440,14 @@ class EdgarSource:
             fiscal_year, period_type = placed
         else:
             start = date.fromisoformat(start_raw)
-            period_type = _period_type(start, end, entry.get("fp"))
+            period_type = _period_type(start, end, fye_month)
             if period_type is None:
                 return Rejection(
                     instrument_ref=ref,
                     detail=f"{line_item} {start}..{end}",
-                    reason=f"unrecognised period span of {(end - start).days} days",
+                    reason=_span_reason(start, end),
                 )
-            fiscal_year = _fiscal_year(end)
+            fiscal_year = _fiscal_year(end, fye_month)
 
         try:
             return ReportedFact(

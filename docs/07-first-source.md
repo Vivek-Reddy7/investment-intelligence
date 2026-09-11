@@ -124,16 +124,21 @@ override remains only for sources that genuinely cannot date their own claims.
 
 - **Eight Indian companies**, not five hundred. Only ADR issuers file with the
   SEC. This is a stage-one source, not the eventual one.
-- **Annual periods in practice.** Foreign private issuers file 20-F annually
-  and their 6-K quarterlies are largely not XBRL-tagged. Only Genpact, a US
-  domestic filer, has real quarterly XBRL. Quarterly trends are much of what a
-  screener is for, so this is a genuine product gap.
+- **Mostly annual, but no longer annual-only.** *Superseded 2026-09-11.* The
+  original claim was that only Genpact had usable quarterly XBRL. That was
+  partly an artefact of our own parser: ~215 genuine quarters were being
+  rejected because EDGAR's `fp` field reads `FY` on quarterly facts. Deriving
+  the quarter from the period end instead recovered them, and the store now
+  holds 551 non-annual facts (Q1-Q4 and H1) across several companies. Annual
+  still dominates, because foreign private issuers file 20-F annually.
 - **Figures are as filed with the SEC** under IFRS or US-GAAP, often in USD —
   not the Ind AS numbers filed in India. They will not match Screener.in, and
   the UI must say so rather than imply otherwise.
-- **372 rejections.** Mostly interim balance dates and quarters whose `fp` hint
-  is unusable. All counted, none imputed — but each is data we are not using,
-  and the count should come down.
+- **Rejections: 372 at first, now 157, of which only 6 are failures.**
+  *Updated 2026-09-11.* The quarter-derivation fix recovered 215. Of what
+  remains, 151 are nine-month year-to-date periods we deliberately do not
+  store (they overlap the quarters they contain), 5 are interim balance dates
+  with no matching period, and 1 is ICICI Bank's 404.
 - **Index efficiency still unmeasured.** 2,393 rows is not enough volume to
   make `EXPLAIN` meaningful.
 
