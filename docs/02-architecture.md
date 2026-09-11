@@ -230,6 +230,56 @@ credentials, served only to them, and **never written to the core store**. The
 enforcement is structural rather than a code review convention: the private
 path gets no write handle to the core store at all.
 
+## 2.12 Revision: the store is append-only and bitemporal
+
+*Added 2026-09-11, following decision 8.5.*
+
+This section revises §2.4, §2.6, §2.7 and §2.1 rather than sitting alongside
+them. Point-in-time screening is not a feature bolted onto a normal store; it
+is a property of how every fact is written.
+
+**Two time axes.** Every fact carries the period it describes (*valid time* —
+"Q2 FY2025", "2026-03-14") and when we learned it (*transaction time* —
+`known_from`). A query without an as-of date means "as of now". A query with
+one means "using only rows where `known_from` is at or before that date".
+
+**Nothing is updated. Nothing is deleted.** A restated figure is a new row
+with a later `known_from`, not an edit. A delisting sets a date on the
+instrument, it does not remove it. This is the whole mechanism, and it is
+fragile in one specific way: a single `UPDATE` written by a future version of
+us destroys history irrecoverably. It needs to be enforced at the database
+level in Phase 4, not left to discipline.
+
+**Idempotency changes meaning.** In §2.4 the rule was "re-running an ingest
+leaves the store unchanged". That rule now has to distinguish two cases:
+
+- Re-ingesting the *same* value must not create a second version.
+- Ingesting a *genuinely changed* value must create one.
+
+So the deduplication key is the natural key plus the value itself, not the
+natural key alone. Getting this wrong in the permissive direction fills the
+store with meaningless versions on every run; getting it wrong in the strict
+direction silently drops restatements, which is the exact thing we are
+building this for.
+
+**Price adjustment becomes point-in-time too (§2.6).** The split-adjusted
+price of a stock in 2023 depends on which corporate actions have happened
+since. A screen run "as of March 2023" must use the adjustment factors known
+in March 2023, not today's. This is why raw prices and corporate actions are
+stored separately with their announcement dates, and adjustment stays a
+computation rather than a stored overwrite.
+
+**Metric materialisation gets harder (§2.7).** Materialising every metric for
+every possible as-of date is not feasible. The working proposal for Phase 4 to
+settle: materialise the current view for fast screening, and compute
+historical as-of views on demand from the versioned facts, accepting that a
+historical screen is slower than a live one. A user running a 2023 screen will
+tolerate two seconds. A user filtering today's universe will not.
+
+**Universe membership is itself versioned (§2.1).** Covered in scope decision
+8.6 — "NIFTY 500" is a time-varying set, and a point-in-time screen needs the
+membership that applied on that date.
+
 ## 3. Invariants
 
 The rules that keep the system honest. Any one of these being violated is a
@@ -244,6 +294,11 @@ defect regardless of whether anything looks wrong.
 7. Private-path data never writes to the core store.
 8. Market data never reads from the user domain.
 9. No serving path triggers an external fetch.
+10. **No fact is ever updated or deleted.** Corrections are new versions.
+11. **Every fact carries `known_from`.** A row we cannot date is a row we
+    cannot use in a point-in-time query, which makes it worse than absent.
+12. **Every query is as-of-dated**, defaulting to now. There is no code path
+    that reads "the value" of a fact without an implied as-of date.
 
 ## 4. Failure modes
 

@@ -37,6 +37,44 @@ The guiding principle for every feature: **show the number and show how it was
 derived.** A P/E on this platform should be clickable down to the earnings
 figure, the period it covers, and the date it was ingested.
 
+### 2.1 The wedge — point-in-time correctness
+
+*Settled 2026-09-11.*
+
+Screening on current fundamentals is a solved problem in India.
+[Screener.in](https://www.screener.in), Tickertape and Trendlyne all do it,
+free, with large user bases. Building a fourth one is not a product.
+
+What none of them do is answer this question:
+
+> What would this screen have returned in March 2023, using only the
+> information that existed in March 2023?
+
+They cannot, for two reasons. They overwrite a figure when a company restates
+it, so the original reported number is gone. And they drop companies that
+delist, so the historical universe silently excludes everything that failed.
+Both are lookahead bias. Both make every backward-looking claim about a screen
+quietly wrong, in the direction of flattering it.
+
+This is the same class of error as filling a backtest at today's close instead
+of tomorrow's open: invisible in the output, and it makes mediocre things look
+good.
+
+**So the wedge is that every fact in this system is stored with the date we
+learned it, and nothing is ever overwritten or deleted.** A restatement is a
+new version. A delisting is a date, not a deletion. Any screen can then be run
+as of any past date and return what it would genuinely have returned.
+
+This is the hardest requirement in the project and the reason the database
+design in Phase 4 is not negotiable after the fact. History that was
+overwritten cannot be recovered.
+
+**Honest limitation.** If no source can give us as-reported historical
+figures, point-in-time correctness only holds forward from our own first
+ingestion. The feature then has a cold-start measured in quarters. Phase 5
+determines which of these worlds we are in, and the answer does not change
+whether we build it this way — only how soon it pays off.
+
 ## 3. What this is NOT
 
 These are hard boundaries, not preferences. They constrain the architecture,
@@ -94,7 +132,8 @@ the engineering. Everything here should be reachable on free infrastructure.
 
 | Area | v1 |
 |---|---|
-| Coverage | Indian listed equities, NSE-listed universe |
+| Coverage | NIFTY 500 constituents, with historical membership |
+| Point-in-time | Every fact versioned by when it was learned; screens runnable as of a past date |
 | Market data | Daily OHLCV, adjusted for splits and bonuses |
 | Fundamentals | Annual and quarterly: revenue, profit, margins, debt, cash flow |
 | Derived metrics | Valuation, profitability, leverage, growth ratios, each traceable to its inputs |
@@ -170,6 +209,26 @@ price data.
 **8.3 Public read without an account — yes.** Anonymous visitors get the full
 read surface. Auth guards only personalised state: watchlists, portfolio,
 alerts.
+
+**8.5 Product wedge — point-in-time screening.** *Settled 2026-09-11.*
+See §2.1. Consequence: the store is append-only and bitemporal. This is the
+one decision in this document that genuinely cannot be revisited later,
+because the cost of being wrong is history we no longer have.
+
+**8.6 Universe — NIFTY 500, not all of NSE.** *Settled 2026-09-11.*
+Roughly 95% of Indian market capitalisation in a quarter of the symbols.
+Backfill measured in hours rather than days, storage comfortably inside free
+tiers, and the fundamentals ingestion problem stays tractable while we are
+still learning its shape. Expanding to full NSE later is a configuration
+change, not a migration — provided nothing assumes the universe is fixed.
+
+**Immediate consequence of combining 8.5 and 8.6:** index membership is itself
+point-in-time data. "NIFTY 500 as of March 2023" is a different set of
+companies from today's. Screening as of a past date therefore requires
+**historical index constituents**, which is a separate sourcing problem from
+prices and fundamentals and is likely the hardest single item in Phase 5. If
+we cannot source it, the honest fallback is a universe defined by our own
+observed listing data rather than by index membership.
 
 **8.4 Project name — pending.** A shorter name is being chosen.
 `investment-intelligence` remains the working directory name until then.

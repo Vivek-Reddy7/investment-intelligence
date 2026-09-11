@@ -13,7 +13,7 @@ turns up mid-phase, it goes in `docs/backlog.md` and we carry on.
 | 2 | System architecture | Component boundaries, data flow, failure modes | Architecture doc + diagram agreed; every v1 feature has a home | **In review** |
 | 3 | Technology stack | Choose languages, frameworks, datastores, hosting | Each choice written as an ADR with the alternative it beat | Blocked on 2 |
 | 4 | Database and data models | Schema for instruments, prices, fundamentals, users | Migrations run; models enforce their own invariants | Blocked on 3 |
-| 5 | Market data sources | Identify sources and verify their terms in writing | Per-source note: coverage, limits, licence, redistribution rights | Blocked on 1 |
+| 5 | Market data sources | Identify sources and verify their terms in writing | Per-source note: coverage, limits, licence, redistribution rights, **as-reported history availability** | Blocked on 1 — **unblocked, highest risk** |
 | 6 | Backend and ingestion | Scheduled ingestion, storage, internal API | Daily ingest runs unattended; gaps are visible, not silent | Blocked on 4, 5 |
 | 7 | Frontend and dashboard | Company pages, charts, screening UI | A stranger can screen and read a company page unaided | Blocked on 6 |
 | 8 | Analytics and screening | Derived metrics, filters, peer comparison | Every metric traceable to its inputs and ingestion date | Blocked on 6 |
@@ -44,3 +44,5 @@ Phase 13 is continuous for the same reason, with a checkpoint at the end.
 | 2026-09-11 | 1 | Opened. Draft vision and scope written, awaiting sign-off. |
 | 2026-09-11 | 1 | Decisions settled: NSE equities only (8.1), fundamentals in v1 (8.2), public read without account (8.3). Name still open — blocks publication, not Phase 2. Phase 1 closed. |
 | 2026-09-11 | 2 | Opened. Architecture drafted: 11 components, 9 invariants, 10 failure modes. No technology named — that is Phase 3. |
+| 2026-09-11 | 1 | Reopened briefly. Product wedge settled (8.5): point-in-time screening. Universe settled (8.6): NIFTY 500 with historical membership. |
+| 2026-09-11 | 2 | Revised for bitemporality (§2.12). Invariants now 12. Surfaced historical index constituents as the likely hardest Phase 5 item. |
