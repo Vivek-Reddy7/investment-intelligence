@@ -9,8 +9,8 @@ turns up mid-phase, it goes in `docs/backlog.md` and we carry on.
 
 | # | Phase | Objective | Exits when | Status |
 |---|---|---|---|---|
-| 1 | Vision and scope | Fix what we are building and what we are not | Scope signed off, open decisions answered | **In progress** |
-| 2 | System architecture | Component boundaries, data flow, failure modes | Architecture doc + diagram agreed; every v1 feature has a home | Blocked on 1 |
+| 1 | Vision and scope | Fix what we are building and what we are not | Scope signed off, open decisions answered | **Done** (name pending) |
+| 2 | System architecture | Component boundaries, data flow, failure modes | Architecture doc + diagram agreed; every v1 feature has a home | **In review** |
 | 3 | Technology stack | Choose languages, frameworks, datastores, hosting | Each choice written as an ADR with the alternative it beat | Blocked on 2 |
 | 4 | Database and data models | Schema for instruments, prices, fundamentals, users | Migrations run; models enforce their own invariants | Blocked on 3 |
 | 5 | Market data sources | Identify sources and verify their terms in writing | Per-source note: coverage, limits, licence, redistribution rights | Blocked on 1 |
@@ -42,3 +42,5 @@ Phase 13 is continuous for the same reason, with a checkpoint at the end.
 | Date | Phase | Event |
 |---|---|---|
 | 2026-09-11 | 1 | Opened. Draft vision and scope written, awaiting sign-off. |
+| 2026-09-11 | 1 | Decisions settled: NSE equities only (8.1), fundamentals in v1 (8.2), public read without account (8.3). Name still open — blocks publication, not Phase 2. Phase 1 closed. |
+| 2026-09-11 | 2 | Opened. Architecture drafted: 11 components, 9 invariants, 10 failure modes. No technology named — that is Phase 3. |

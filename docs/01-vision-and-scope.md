@@ -151,37 +151,36 @@ the criteria are about whether the thing is real:
    find that they agree.
 5. It is explainable in an interview as a system, not as a set of features.
 
-## 8. Open decisions
+## 8. Decisions
 
-These need answering before Phase 2 can produce a useful architecture. My
-recommendation is given, but each one changes the design materially.
+**8.1 Market coverage — NSE-listed Indian equities only.** *Settled
+2026-09-11.* Free data exists, the space is less saturated than US-market
+tooling, and it is the market we actually understand. Consequence for Phase 4:
+**do not hardcode a single exchange.** Instruments carry an exchange, and
+currency is a field rather than an assumption. Adding another market later
+should be a data-source problem, not a migration.
 
-**8.1 Market coverage — recommend NSE-listed Indian equities only.**
-It is the market you know, free data exists, and the space is less saturated
-than US-market tooling. Adding US equities later is mostly a data-source and
-currency problem rather than an architectural one, provided we do not hardcode
-the assumption of a single exchange.
+**8.2 Fundamentals are in v1.** *Settled 2026-09-11.* This is the
+differentiator and the real data-engineering work. It is also the hardest
+ingestion problem in the project: statements arrive irregularly, restatements
+happen, and line items are not consistently named across companies. Phase 5
+must treat fundamentals sourcing as its main risk, not an afterthought behind
+price data.
 
-**8.2 Fundamentals in v1 — recommend yes, and they are the differentiator.**
-Price-only platforms are commodities. The work in this project is fundamentals
-ingestion and normalisation, which is also the part that demonstrates data
-engineering. It is the hardest ingestion problem here and should be scoped
-carefully, not dropped.
+**8.3 Public read without an account — yes.** Anonymous visitors get the full
+read surface. Auth guards only personalised state: watchlists, portfolio,
+alerts.
 
-**8.3 Public read without an account — recommend yes.**
-It is what makes the project demonstrable by sending someone a link, and
-read-only public traffic is cheap. Auth then guards only the personalised
-surfaces.
-
-**8.4 Project name.** `investment-intelligence` is a working directory name,
-not a decision. Worth settling before the repository goes public, since
-renaming later breaks links.
+**8.4 Project name — pending.** A shorter name is being chosen.
+`investment-intelligence` remains the working directory name until then.
+Renaming is cheap now and expensive once the repository is public and linked
+from a CV, so this blocks publication but not Phase 2.
 
 ---
 
 ## Exit criteria for Phase 1
 
-- [ ] Sections 3 and 5 signed off — the non-goals matter more than the goals
-- [ ] Open decisions in Section 8 answered
-- [ ] Project name chosen
-- [ ] Phase 2 may then begin
+- [x] Sections 3 and 5 signed off — the non-goals matter more than the goals
+- [x] Open decisions 8.1, 8.2, 8.3 answered
+- [ ] Project name chosen (blocks publication, not Phase 2)
+- [x] Phase 2 may begin
