@@ -125,7 +125,16 @@ def test_app_role_cannot_insert_facts(conn, seeded):
 #
 # Keeping this as an explicit allow-list rather than dropping the test means a
 # future migration that grants DELETE on a fact table fails here.
-DELETABLE_TABLES = {"metric_values"}
+# `quality_findings` joins the list for the same reason `metric_values` is on
+# it: every row is recomputable by calling quality_as_of(), so replacing the
+# table wholesale loses nothing.
+#
+# `ingestion_rejections` deliberately does NOT, and migration 019 revokes the
+# DELETE that 018 granted out of habit. A rejection is not derivable from the
+# facts -- the rejected items are precisely the ones that never became facts --
+# so deleting one destroys the only evidence we saw that data and declined it.
+# This test is what forced that distinction to be made explicit.
+DELETABLE_TABLES = {"metric_values", "quality_findings"}
 
 
 @pytest.mark.parametrize("role", ["ii_app", "ii_ingest"])

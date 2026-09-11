@@ -230,7 +230,7 @@ specific defence.
 **Exit:** A deliberately broken ingestion run produces an alert within one
 cycle. Staleness is visible to users, not only to us.
 
-### Phase 17 — Data quality and reconciliation
+### Phase 17 — Data quality and reconciliation · **DONE** (discontinuity detection deferred)
 **Build:** Cross-source validation, corporate-action discontinuity detection,
 fundamentals sanity rules, and a reconciliation report.
 **Why:** For a product whose entire claim is that its history is trustworthy,
@@ -322,6 +322,7 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
 | 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
 | 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
+| 2026-09-11 | 17 | **Data quality.** Six accounting-identity checks; cross-currency validation gives cross-source-style checking from a single source (43 pairs, 0 inconsistencies). Coverage reported beside findings so an inert check cannot read as clean data. The 372 rejections classified: 366 come from 2 companies and are one parser gap, now diagnosed precisely in the backlog. 202 tests. |
 | 2026-09-11 | 14 | **179 tests, 91% coverage, CI gating merges.** Real deliverable is the 24-row invisible-failure inventory in 14-testing-strategy.md. Adapter contract suite added — found that FixtureSource had diverged from EdgarSource, so engine tests were validating behaviour production lacks. Also fixed `gaps()` reporting 'no gaps' when nothing was planned. |
 | 2026-09-11 | 8 | **Daily job built.** 8s over 10 companies, 0 writes when nothing changed. ingestion_health() detects the run that did NOT happen; /api/v1/health returns 503 out-of-band because a scheduler cannot detect its own failure to run. Migration 016 splits NEVER_RAN from NEVER_SUCCEEDED. 134 tests. |
 | 2026-09-11 | 10-11 | **API and UI running locally.** 4 versioned routes, screener with as-of control, provenance to the SEC document, freshness on every response. Read-only enforced by the ii_web database role. 40 contract checks. |

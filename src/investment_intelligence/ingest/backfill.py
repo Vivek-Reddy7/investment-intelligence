@@ -38,6 +38,7 @@ from investment_intelligence.ingest.writer import (
     WriteResult,
     write_filing,
 )
+from investment_intelligence.ingest import rejections as rejection_log
 from investment_intelligence.sources.base import FilingSource, Rejection
 
 log = logging.getLogger(__name__)
@@ -256,6 +257,9 @@ def run(
             report.instruments_failed += 1
             conn.commit()
 
+    # Rejections are persisted, not just counted. Phase 7 discarded 372
+    # reasons because they lived only in this report object.
+    rejection_log.record(conn, report.run_id, source.source_id, report.rejections)
     _finish_run(conn, report.run_id, report)
     conn.commit()
     return report

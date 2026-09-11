@@ -19,6 +19,7 @@ from datetime import date
 from investment_intelligence.companies import STAGE_ONE
 from investment_intelligence.db import connect, migrate
 from investment_intelligence.ingest import backfill, incremental
+from investment_intelligence.ingest import rejections as rejection_log
 from investment_intelligence.sources.edgar import EdgarSource
 
 SOURCE_ID = "SEC_EDGAR"
@@ -181,6 +182,65 @@ def cmd_schedule(args: argparse.Namespace) -> None:
     print(f"scheduled {SOURCE_ID}/FUNDAMENTALS, stale after {args.max_age_days} days")
 
 
+def cmd_quality(args: argparse.Namespace) -> None:
+    """The data quality report.
+
+    Prints coverage alongside findings, always. Zero findings over zero
+    evaluable periods is an inert check, not clean data, and reporting them
+    the same way is actively reassuring.
+    """
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT refresh_quality_findings()")
+            cur.execute("SELECT * FROM quality_coverage()")
+            coverage = cur.fetchall()
+        conn.commit()
+
+        print("CHECKS")
+        inert = 0
+        errors = 0
+        for code, severity, evaluable, findings in coverage:
+            if evaluable == 0:
+                mark, note = "??", "INERT — no periods could be evaluated"
+                inert += 1
+            elif findings == 0:
+                mark, note = "ok", f"clean over {evaluable} periods"
+            else:
+                mark = "!!" if severity == "ERROR" else " ~"
+                note = f"{findings} finding(s) over {evaluable} periods"
+                if severity == "ERROR":
+                    errors += findings
+            print(f"  {mark} {code:24s} {severity:5s} {note}")
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT q.severity, f.check_code, f.fiscal_year, f.detail "
+                "FROM quality_findings f JOIN quality_checks q USING (check_code) "
+                "ORDER BY q.severity, f.check_code LIMIT %s", (args.limit,))
+            rows = cur.fetchall()
+        if rows:
+            print("\nFINDINGS")
+            for severity, code, fy, detail in rows:
+                print(f"  [{severity}] {code} FY{fy}: {detail}")
+
+        print("\nREJECTED AT INGESTION")
+        summary = rejection_log.summary(conn)
+        if not summary:
+            print("  none recorded")
+        for row in summary:
+            print(f"  {row['reason_class']:26s} {row['rejections']:>5}  "
+                  f"across {row['instruments']:>2} instrument(s)")
+        unclassified = rejection_log.unclassified(conn)
+        if unclassified:
+            # A growing UNCLASSIFIED bucket means the source started rejecting
+            # things for a new reason and nobody noticed.
+            print(f"  UNCLASSIFIED reasons needing a rule: {unclassified[:3]}")
+
+    # Non-zero on an ERROR finding or an inert check. A clean report over
+    # checks that never ran is the outcome this exit code exists to prevent.
+    raise SystemExit(1 if (errors or inert) else 0)
+
+
 def cmd_gaps(args: argparse.Namespace) -> None:
     with connect() as conn:
         total = backfill.planned(conn, JOB)
@@ -245,6 +305,10 @@ def main(argv: list[str] | None = None) -> None:
     sch.set_defaults(func=cmd_schedule)
 
     sub.add_parser("health").set_defaults(func=cmd_health)
+
+    qual = sub.add_parser("quality")
+    qual.add_argument("--limit", type=int, default=20)
+    qual.set_defaults(func=cmd_quality)
 
     sub.add_parser("gaps").set_defaults(func=cmd_gaps)
 
