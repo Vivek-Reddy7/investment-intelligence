@@ -143,29 +143,182 @@ broker regardless of its terms.
 
 ---
 
-## 3. What is probably not licensed — and needs verifying next
+## 3. The NSE policy read in full — four findings
 
-The finding in §1 is about **market data**: prices, volumes, quotes. It says
-nothing about **company financial statements**, which are statutory public
-disclosures filed by companies rather than exchange-generated market data.
+Obtained directly: [NSE Data Usage and Data Sharing Policy](https://nsearchives.nseindia.com/web/sites/default/files/inline-files/NSE_Data_Sharing&Usage_Policy.pdf),
+12 pages. This is the document the tariffs sit under, and it is more
+consequential than the tariffs.
 
-If fundamentals are usable, then a fundamentals-driven screener is buildable
-publicly while prices are not. That is the single most important open question
-left in this phase, because it determines whether the product survives §1 in
-recognisable form.
+### 3.1 "Market Data" is defined very broadly — but it is scoped to NSE as the source
 
-Specific items to verify, in priority order:
+Clause 13(d), verbatim:
 
-1. Company financial statements — can filed results be displayed publicly and
-   in derived form? Source: SEBI LODR disclosure requirements, exchange
-   filing-archive terms.
-2. Corporate actions — splits, bonuses, dividends. Statutory disclosures, but
-   confirm the archive's terms.
-3. Historical index constituents — already flagged as the hardest item, and
-   NSE index data is likely to sit under the same licensing regime as market
-   data.
-4. Whether any authorised vendor offers redistribution rights at a price
-   compatible with a zero-revenue project.
+> "**Market Data** means any data and information (including any figures,
+> statistics, numbers) in relation to any securities and/or derivatives
+> contracts (including price, identifiers, volume, trade related data) **as
+> well as any company**. This includes, without limitation, online streaming
+> data, real time data (live feed data), snapshot data, delayed data, end of
+> day data, historical data, tick by tick order and trade data **and corporate
+> data** which may be transmitted to the Subscribers by NSE or NSE Data."
+
+The first read of this is alarming — "in relation to … any company" and
+"corporate data" would sweep in fundamentals.
+
+The operative qualifier is the last clause: **"which may be transmitted to the
+Subscribers by NSE or NSE Data."** The policy governs data *obtained from NSE*.
+Clause 7.2 confirms the same framing:
+
+> "The ownership of all Market Data shall at all times lie with NSE/ NSE Data."
+
+— but again of "such Market Data licensed by NSE or NSE Data".
+
+So what NSE owns and licenses is **its dataset**, not the underlying facts. A
+company's reported revenue is not NSE's property. NSE's compiled, transmitted
+feed of it is.
+
+**This is the distinction the whole product now rests on**, so it should be
+tested by a lawyer before public launch rather than by me. Nothing below is
+legal advice.
+
+### 3.2 The non-commercial route exists and is a dead end for us
+
+Clause 8.3 offers hope:
+
+> "The Board of NSE Data may also consider introducing reduced fee
+> arrangements or waivers for Non-Commercial Users."
+
+Clause 13(e) defines Non-Commercial Users to include "Researchers, Students
+etc." — which arguably fits.
+
+But clause 9.1 requires any such request to be "routed through Economic Policy
+Research Department" with prior approval of NSE's managing director, and 9.3
+closes it off entirely:
+
+> "All Non-Commercial Users, Research Entities and Analysts (whether
+> commissioned for research in terms of Clause 9.1 or otherwise) shall sign a
+> **declaration of confidentiality** as part of their underlying
+> documentation."
+
+A confidentiality declaration is incompatible with publishing the data on a
+public website. **The non-commercial waiver cannot produce a public platform.**
+Route closed, decisively.
+
+### 3.3 New hard prohibition — simulation and virtual trading are banned outright
+
+Clause 7.4, verbatim:
+
+> "The Market Data shall not be provided to
+> individuals/entities/platforms/apps/websites etc., engaging in online
+> gaming, **virtual trading or simulation**, fantasy games, an activity of
+> similar nature or any other activity which shall be prohibited by the
+> applicable laws or regulator…"
+
+This is a **prohibition, not a fee.** No amount of money buys it.
+
+Consequences worth recording:
+
+- If we ever licensed NSE market data, we could not offer paper trading or
+  portfolio simulation on top of it.
+- Phase 22's "screen backtesting via `paper-trader` as a library" is at risk
+  under this clause if it were to run on NSE-licensed data. Backtesting a
+  screen is arguably simulation.
+- `paper-trader` itself is unaffected today — it uses no NSE data — but this
+  means it could never legally be migrated onto an NSE feed either.
+
+### 3.4 Index construction needs a separate licence
+
+Clause 7.1(a) prohibits using Market Data to create any financial index,
+custom or composite, without separate licensing. Relevant to any future
+"ranking" feature that resembles index construction.
+
+---
+
+## 4. Company filings — the route that works
+
+### 4.1 Statements are statutorily public, and published by the company
+
+SEBI LODR Regulation 33 requires listed entities to file quarterly and annual
+financial results. Regulation 47 requires publication in newspapers. Current
+practice requires the newspaper advertisement to carry a QR code and the
+webpage address **where the complete financial results are available on the
+company's own website**.
+
+So the financial statements are: mandated to be public, published by the
+company, and available from the company directly. Their public availability
+does not depend on NSE transmitting them.
+
+### 4.2 This is what existing platforms actually do
+
+Screener.in computes its metrics from audited regulatory filings and links
+through to the exchange filings repository for source documents. It is not
+reselling an exchange price feed to produce those financials. That is the same
+route described in §4.1, operating at scale, in public, for years.
+
+Practical precedent is not a legal opinion, but a decade of a well-known
+Indian platform doing exactly this is meaningful evidence.
+
+### 4.3 Facts versus compilations
+
+Indian copyright law does not protect facts, and has rejected the
+"sweat of the brow" standard in favour of requiring a modicum of creativity.
+Reported revenue for a quarter is a fact. A particular compilation or
+presentation of many such facts may be protected; the numbers themselves are
+not.
+
+So the defensible position is: **obtain figures from the company's own
+statutory disclosures, normalise them ourselves, present them in our own
+form.** Not: copy someone else's database.
+
+### 4.4 Still unverified
+
+- **BSE's terms** for its filings repository — not read. BSE's *market data*
+  regime is presumably similar to NSE's; the filings archive is a different
+  thing and needs checking separately.
+- **Corporate actions** — splits, bonuses, dividends. Statutory disclosures,
+  but the archive's terms are unread.
+- **Historical index constituents** — almost certainly sits under NSE's index
+  licensing (§3.4). Assume unavailable until proven otherwise.
+
+---
+
+## 5. Conclusion — the product that is legally buildable, free, and public
+
+| Data | Public display, free? | Source |
+|---|---|---|
+| Company fundamentals | **Yes** (§4) | Company statutory disclosures |
+| Derived fundamental metrics | **Yes** | Computed by us from the above |
+| Restatement history | **Yes** | Successive filings |
+| Prices / OHLCV | **No** — ₹1,10,000 per medium | NSE licence required |
+| Market cap, P/E, P/B | **No** — needs prices | — |
+| Index membership, historical | **Assume no** (§3.4) | — |
+| A user's own holdings and P&L | **Yes, to that user only** | Their broker, free tier |
+
+### The resolution
+
+**A publicly accessible, point-in-time fundamentals platform is buildable at
+zero cost.** Screening on ROCE, margins, growth, leverage, cash conversion and
+their history — all as-of-dateable, all traceable to a filing — needs no price
+data and no NSE licence.
+
+**Anything price-derived moves behind the private path**, where a signed-in
+user connects their own broker account under Kite's free Personal tier and
+sees prices and valuation computed against their own licensed data.
+
+This is exactly the two-path split designed in Phase 4 §2.11, arrived at
+independently from a different direction. The architecture needed no change to
+absorb the largest finding in the project — which is the strongest possible
+argument for having written it before any code.
+
+### What the product loses, stated plainly
+
+No public price charts. No public market cap, P/E or P/B. No public
+large/mid/small-cap classification. A fundamentals screener without valuation
+ratios is a genuinely narrower product than what Phase 1 described, and that
+should be acknowledged rather than spun.
+
+What it keeps is the wedge, intact: nobody free in India lets you ask what a
+fundamentals screen would have returned on a past date using only what was
+known then.
 
 ---
 
@@ -190,10 +343,21 @@ having done Phase 4 before Phase 6. What changes is scope, not structure.
 - [x] Zerodha Kite Connect tiers and costs verified from primary sources
 - [x] Angel One SmartAPI April 2026 changes verified from primary source
 - [x] NSE EOD and delayed-data display tariffs verified from primary sources
-- [ ] NSE Data Usage and Sharing Policy read in full (fetch timed out)
-- [ ] Kite Connect terms of service located and redistribution clause quoted
-- [ ] Company-filings licensing position established
+- [x] NSE Data Usage and Sharing Policy read in full — 4 findings, §3
+- [x] Company-filings position established — §4
+- [x] **Go/no-go reached: GO, fundamentals public, prices private** — §5
+- [ ] BSE filings repository terms read
 - [ ] Corporate-actions source and terms established
-- [ ] Historical index constituents source and terms established
-- [ ] Upstox / Dhan / Groww / Fyers terms read
-- [ ] **Go/no-go on a publicly accessible product, and on what data**
+- [ ] Historical index constituents — assume unavailable, confirm
+- [ ] Kite Connect terms of service located and redistribution clause quoted
+- [ ] Upstox / Dhan / Groww / Fyers terms read — now low priority (§5)
+- [ ] **Legal review of the §3.1 facts-versus-feed distinction before public
+      launch.** This is the load-bearing legal reading in the whole project and
+      it should not rest on my analysis
+
+## Disclaimer
+
+This document is engineering research, not legal advice. The §3.1 distinction
+between exchange-transmitted data and the underlying facts, and the §4.3
+reading of Indian copyright law, both warrant a qualified opinion before the
+platform is publicly accessible.

@@ -65,7 +65,7 @@ because history that was overwritten is gone.
 §2.1; architecture §2.12; invariants 10–12.
 **Exit:** Wedge and universe settled. Consequences propagated to architecture.
 
-### Phase 3 — Data sources and legal verification · **NEXT**
+### Phase 3 — Data sources and legal verification · **GO DECISION REACHED**
 **Build:** A written per-source assessment: coverage, history depth, rate
 limits, cost, licence terms, redistribution rights, and — critically —
 whether as-reported (unrestated) history and historical index constituents
@@ -315,3 +315,6 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 2 | Wedge settled (8.5): point-in-time screening. Universe (8.6): NIFTY 500. |
 | 2026-09-11 | — | Architecture revised for bitemporality (§2.12). Invariants now 12. |
 | 2026-09-11 | — | Roadmap expanded to 22 phases in 4 tiers. Data sources moved to phase 3; ingestion split; security and data quality promoted to phases. |
+| 2026-09-11 | 3 | NSE tariffs verified: public display of EOD market data ₹1,10,000 per medium, 15-min delayed ₹60,000, no delay makes it free. |
+| 2026-09-11 | 3 | NSE data policy read in full. Non-commercial waiver requires a confidentiality declaration — closed. Clause 7.4 bans simulation/virtual trading outright, at any price. |
+| 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
