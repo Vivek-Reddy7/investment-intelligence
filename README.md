@@ -151,14 +151,20 @@ and why — including what turned out to be wrong.
 
 ## Status
 
-**Tier 1 complete except deployment.** The platform runs locally end to end:
-ingestion, metrics, screening, accounts, alerts, observability. What it is
-not is deployed — that needs a Neon project, a Vercel account and a public
-repository, and it is [Phase 12](ROADMAP.md).
+**Tiers 1 and 2 complete except deployment** — phases 1–11 and 13–18. The
+platform runs locally end to end: ingestion, metrics, screening, accounts,
+alerts, observability, data-quality checks. What it is not is deployed — that
+needs a Neon project, a Vercel account and a public repository, and it is
+[Phase 12](ROADMAP.md), the one phase left in the first two tiers.
+
+Production readiness landed before deployment on purpose: phase 12 is the only
+phase that needs accounts and credentials rather than code, so everything that
+could be built without them was.
 
 Known limitations are listed per phase rather than summarised optimistically.
-The main ones: no prices, mostly annual periods, eight companies, and no
-email is sent because nothing is wired to a provider yet.
+The main ones: no prices, mostly annual periods, nine companies with data out
+of ten tracked, and no email is sent because nothing is wired to a provider
+yet — so magic-link sign-in and alerts are built but cannot deliver.
 
 ## Not to be confused with
 
