@@ -17,6 +17,7 @@ import psycopg
 import pytest
 
 from conftest import add_fact, add_filing, utc
+from test_append_only import FACT_TABLES
 from investment_intelligence.db import MigrationDrift, discover, migrate
 
 
@@ -111,9 +112,24 @@ def test_app_role_cannot_insert_facts(conn, seeded):
             )
 
 
+# The only tables any role may delete from. Both are DERIVED and
+# recomputable: `metric_values` is `metrics_as_of(now())` materialised, and
+# replacing it wholesale is how a refresh works.
+#
+# An earlier version of this test asserted DELETE was granted nowhere at all,
+# which was the wrong rule stated too confidently. The right rule is the
+# distinction 005_append_only.sql already draws: a table recording what a
+# company REPORTED is immutable; a table recording what we DERIVED or what our
+# pipeline did is not. Deleting a derived row loses nothing, because it can be
+# recomputed from the facts. Deleting a fact loses history permanently.
+#
+# Keeping this as an explicit allow-list rather than dropping the test means a
+# future migration that grants DELETE on a fact table fails here.
+DELETABLE_TABLES = {"metric_values"}
+
+
 @pytest.mark.parametrize("role", ["ii_app", "ii_ingest"])
-def test_no_role_is_granted_delete_anywhere(conn, role):
-    """Nothing in this system has a legitimate reason to delete a row."""
+def test_delete_is_granted_only_on_derived_tables(conn, role):
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -122,7 +138,43 @@ def test_no_role_is_granted_delete_anywhere(conn, role):
             """,
             (role,),
         )
+        granted = {row[0] for row in cur.fetchall()}
+    assert granted <= DELETABLE_TABLES, (
+        f"DELETE granted on non-derived table(s): {sorted(granted - DELETABLE_TABLES)}"
+    )
+
+
+def test_no_application_role_can_delete_a_fact(conn):
+    """The rule that actually matters, stated directly.
+
+    Scoped to the application roles, because a table's OWNER implicitly holds
+    every privilege in PostgreSQL and cannot be stripped of them. That is not a
+    hole, it is the reason invariant 10 is enforced twice: privileges stop the
+    application roles, and the triggers in 005/009 stop everyone including the
+    owner. Each layer covers the other's blind spot.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT grantee, table_name, privilege_type
+            FROM   information_schema.role_table_grants
+            WHERE  grantee IN ('ii_app', 'ii_ingest')
+              AND  privilege_type IN ('DELETE', 'TRUNCATE')
+              AND  table_name = ANY(%s)
+            """,
+            (list(FACT_TABLES),),
+        )
         assert cur.fetchall() == []
+
+
+def test_the_owner_can_delete_but_the_trigger_stops_it(conn, seeded):
+    """Proves the two layers are genuinely complementary rather than redundant.
+
+    The test harness connects as the owner, so privileges do not protect us
+    here at all -- and the delete is still refused, by the trigger.
+    """
+    with conn.cursor() as cur, pytest.raises(psycopg.errors.RaiseException):
+        cur.execute("DELETE FROM financial_facts")
 
 
 def test_app_role_is_granted_no_update_on_fact_tables(conn):

@@ -145,7 +145,7 @@ rows for every attempt including failures.
 **Exit:** Runs unattended for a week. A failed run is visible as a row. A
 simulated restatement produces a new version, not an overwrite.
 
-### Phase 9 — Analytics and screening engine
+### Phase 9 — Analytics and screening engine · **DONE**
 **Build:** Derived metrics with provenance, multi-criteria screening, peer
 comparison, and as-of-date screening.
 **Why:** This is the product. Everything before it is plumbing.
@@ -322,6 +322,7 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
 | 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
 | 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
+| 2026-09-11 | 9 | **Screening works.** 9 metrics, point-in-time screens, provenance to the SEC document. 118 tests. Migration 014 fixes a fail-closed universe bug: every screen returned zero because universe_as_of required lifecycle events the adapter never ingests. |
 | 2026-09-11 | 7 | **SEC EDGAR loaded.** 2,393 facts, 118 filings, 9/10 companies, re-run a verified no-op. Natively bitemporal, explicitly reusable. Wedge verified on real data incl. a Rs 2bn Sify restatement across two filings. Four invisible bugs found by live data; see 07-first-source.md §4. |
 | 2026-09-11 | 3 | Commercial fundamentals APIs priced and terms read (03a). No off-the-shelf plan grants public display. Separately, none serve as-reported figures — so paying buys a conventional screener, not the wedge. |
 | 2026-09-11 | 7 | Backfill engine built: adapter interface, boundary validation, idempotent versioned writer, resumable checkpointed backfill. 69 tests. **Blocked on a source**: official BSE/NSE filings APIs are ~Rs 20 lakh/year, unofficial scrapers are excluded by instruction. See 03-data-sources.md §6. |
