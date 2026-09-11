@@ -155,7 +155,7 @@ current view plus on-demand historical computation.
 run as of a past date excludes companies that had not yet listed and uses
 figures as they were then reported.
 
-### Phase 10 — Read API
+### Phase 10 — Read API · **DONE**
 **Build:** The query surface: one instrument over time, many instruments
 filtered, reference data. Freshness stamps from the run log.
 **Why:** It enforces invariant 9 — no serving path triggers an external fetch
@@ -164,7 +164,7 @@ filtered, reference data. Freshness stamps from the run log.
 **Exit:** Serves entirely from the store. Every response carries data
 freshness. Cold start tolerated.
 
-### Phase 11 — Frontend and dashboard
+### Phase 11 — Frontend and dashboard · **DONE** (charts deferred)
 **Build:** Company pages, price and financial history charts, the screener UI,
 peer comparison, and the as-of-date control.
 **Why:** Until this exists, nothing is demonstrable. The as-of-date control is
@@ -322,6 +322,7 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
 | 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
 | 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
+| 2026-09-11 | 10-11 | **API and UI running locally.** 4 versioned routes, screener with as-of control, provenance to the SEC document, freshness on every response. Read-only enforced by the ii_web database role. 40 contract checks. |
 | 2026-09-11 | 9 | **Screening works.** 9 metrics, point-in-time screens, provenance to the SEC document. 118 tests. Migration 014 fixes a fail-closed universe bug: every screen returned zero because universe_as_of required lifecycle events the adapter never ingests. |
 | 2026-09-11 | 7 | **SEC EDGAR loaded.** 2,393 facts, 118 filings, 9/10 companies, re-run a verified no-op. Natively bitemporal, explicitly reusable. Wedge verified on real data incl. a Rs 2bn Sify restatement across two filings. Four invisible bugs found by live data; see 07-first-source.md §4. |
 | 2026-09-11 | 3 | Commercial fundamentals APIs priced and terms read (03a). No off-the-shelf plan grants public display. Separately, none serve as-reported figures — so paying buys a conventional screener, not the wedge. |
