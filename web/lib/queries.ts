@@ -81,6 +81,27 @@ export async function freshness(): Promise<Freshness[]> {
   return rows;
 }
 
+export type JobHealth = {
+  source_id: string; kind: string; max_age: string;
+  last_success: string | null; age: string | null;
+  last_outcome: string | null; status: string;
+};
+
+/**
+ * Expected-vs-actual ingestion, including jobs that did not run at all.
+ *
+ * Distinct from `freshness()`, which summarises runs that happened. This one
+ * reports on an EXPECTATION, which is the only way an absent run is visible.
+ * See migration 015.
+ */
+export async function ingestionHealth(): Promise<JobHealth[]> {
+  const { rows } = await pool.query<JobHealth>(
+    `SELECT source_id, kind, max_age::text, last_success, age::text,
+            last_outcome, status
+     FROM   ingestion_health()`);
+  return rows;
+}
+
 export async function metricDefinitions(): Promise<MetricDef[]> {
   const { rows } = await pool.query<MetricDef>(`
     SELECT metric_code, label, definition, family, unit, higher_is_better

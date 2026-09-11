@@ -18,7 +18,7 @@ from datetime import date
 
 from investment_intelligence.companies import STAGE_ONE
 from investment_intelligence.db import connect, migrate
-from investment_intelligence.ingest import backfill
+from investment_intelligence.ingest import backfill, incremental
 from investment_intelligence.sources.edgar import EdgarSource
 
 SOURCE_ID = "SEC_EDGAR"
@@ -120,6 +120,67 @@ def cmd_backfill(args: argparse.Namespace) -> None:
             print(f"    {rejection.instrument_ref}: {rejection.reason}")
 
 
+def cmd_incremental(args: argparse.Namespace) -> None:
+    """The daily job. Cheap, and its real output is the run-log row."""
+    limiter = backfill.RateLimiter(0.5)
+    with connect() as conn:
+        report = incremental.run(conn, _source(), limiter=limiter,
+                                 lookback_years=args.lookback)
+    print(f"run {report.run_id}: {report.outcome}")
+    print(f"  checked={report.instruments_checked} failed={report.instruments_failed}")
+    print(f"  new filings={report.new_filings} "
+          f"facts written={report.writes.facts_written} "
+          f"unchanged={report.writes.facts_unchanged}")
+    print(f"  metrics refreshed={report.metrics_refreshed}")
+    if report.rejections:
+        print(f"  rejections={len(report.rejections)}")
+    # Non-zero exit on a failed cycle so the scheduler surfaces it. A job that
+    # always exits 0 turns a red run into a green one.
+    raise SystemExit(1 if report.outcome == "FAILED" else 0)
+
+
+def cmd_health(args: argparse.Namespace) -> None:
+    """Report expected-vs-actual ingestion. Exits non-zero if anything is off.
+
+    This is the mitigation for GitHub Actions silently disabling a schedule
+    after 60 days of repository inactivity (ADR 004). It answers a question a
+    run-log query cannot: whether a run that should have happened did not.
+    """
+    with connect() as conn:
+        rows = incremental.health(conn)
+    if not rows:
+        print("no jobs are scheduled — nothing is being monitored")
+        raise SystemExit(1)
+    bad = 0
+    for row in rows:
+        flag = "ok " if row["status"] == "OK" else "!! "
+        if row["status"] != "OK":
+            bad += 1
+        age = row["age"]
+        print(f"  {flag}{row['source_id']}/{row['kind']}: {row['status']}"
+              f"  last success {row['last_success']}"
+              f"  age {age if age else 'never'}  (limit {row['max_age']})")
+    raise SystemExit(1 if bad else 0)
+
+
+def cmd_schedule(args: argparse.Namespace) -> None:
+    """Declare what we expect to run, so its absence is detectable."""
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ingestion_schedule (source_id, kind, max_age, note)
+                VALUES (%s, 'FUNDAMENTALS', %s, %s)
+                ON CONFLICT (source_id, kind) DO UPDATE
+                   SET max_age = excluded.max_age, note = excluded.note
+                """,
+                (SOURCE_ID, f"{args.max_age_days} days",
+                 "Annual filings: nothing new most days, but the JOB must still run."),
+            )
+        conn.commit()
+    print(f"scheduled {SOURCE_ID}/FUNDAMENTALS, stale after {args.max_age_days} days")
+
+
 def cmd_gaps(args: argparse.Namespace) -> None:
     with connect() as conn:
         found = backfill.gaps(conn, JOB, "SEC_CIK")
@@ -166,6 +227,17 @@ def main(argv: list[str] | None = None) -> None:
     bf.add_argument("--limit", type=int, default=None,
                     help="bound this invocation; resume by running again")
     bf.set_defaults(func=cmd_backfill)
+
+    inc = sub.add_parser("incremental")
+    inc.add_argument("--lookback", type=int, default=2,
+                     help="years back to look for newly filed documents")
+    inc.set_defaults(func=cmd_incremental)
+
+    sch = sub.add_parser("schedule")
+    sch.add_argument("--max-age-days", type=int, default=3, dest="max_age_days")
+    sch.set_defaults(func=cmd_schedule)
+
+    sub.add_parser("health").set_defaults(func=cmd_health)
 
     sub.add_parser("gaps").set_defaults(func=cmd_gaps)
 

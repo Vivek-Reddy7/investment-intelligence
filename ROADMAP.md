@@ -134,7 +134,7 @@ It is also the first real test of whether the schema holds.
 **Exit:** Full universe loaded with target history depth. Re-running is a
 no-op. Gaps are enumerated, not hidden.
 
-### Phase 8 — Ingestion: incremental and scheduled
+### Phase 8 — Ingestion: incremental and scheduled · **DONE** (schedule activates at deploy)
 **Build:** The daily post-close job, plus event-shaped fundamentals ingestion
 for newly filed and restated statements.
 **Why:** This is the part that runs forever unattended. Its correctness
@@ -322,6 +322,7 @@ introduces credential handling, which should not be attempted before phase 15.
 | 2026-09-11 | 3 | **GO decision:** fundamentals public (statutory filings, §4), prices private (per-user broker). Architecture unchanged. Scope narrowed: no public valuation ratios. |
 | 2026-09-11 | 4 | Revised (§2.13). Fundamentals worker becomes primary; price worker and price adjustment move to the private path; universe membership derived from our own filing data since historical index constituents are licensed. Invariants unchanged. |
 | 2026-09-11 | 5 | Opened. ADRs 001-005 settled: Postgres, Neon, Python ingestion, GitHub Actions cron, bitemporality in plain SQL with privileges enforcing append-only. ADR 006 (web stack) open. |
+| 2026-09-11 | 8 | **Daily job built.** 8s over 10 companies, 0 writes when nothing changed. ingestion_health() detects the run that did NOT happen; /api/v1/health returns 503 out-of-band because a scheduler cannot detect its own failure to run. Migration 016 splits NEVER_RAN from NEVER_SUCCEEDED. 134 tests. |
 | 2026-09-11 | 10-11 | **API and UI running locally.** 4 versioned routes, screener with as-of control, provenance to the SEC document, freshness on every response. Read-only enforced by the ii_web database role. 40 contract checks. |
 | 2026-09-11 | 9 | **Screening works.** 9 metrics, point-in-time screens, provenance to the SEC document. 118 tests. Migration 014 fixes a fail-closed universe bug: every screen returned zero because universe_as_of required lifecycle events the adapter never ingests. |
 | 2026-09-11 | 7 | **SEC EDGAR loaded.** 2,393 facts, 118 filings, 9/10 companies, re-run a verified no-op. Natively bitemporal, explicitly reusable. Wedge verified on real data incl. a Rs 2bn Sify restatement across two filings. Four invisible bugs found by live data; see 07-first-source.md §4. |

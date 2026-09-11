@@ -1,0 +1,71 @@
+# Daily incremental ingestion.
+#
+# Public repositories get unlimited Actions minutes (ADR 004), so this is free.
+#
+# TWO THINGS TO KNOW BEFORE TRUSTING THIS FILE
+#
+# 1. GitHub silently disables scheduled workflows after 60 days with no
+#    repository activity. One email, then nothing. This is a real instance of
+#    architecture §4's "scheduler never fires", whose symptom is
+#    indistinguishable from "nothing to do".
+#
+# 2. **A scheduler cannot detect its own failure to run.** The `health` step
+#    below is genuinely useful when the workflow runs and the ingestion fails.
+#    It is worthless when the workflow itself is disabled, because it does not
+#    run either. So the real detection lives OUT OF BAND:
+#      - the freshness banner on every page of the site, and
+#      - GET /api/v1/health, which returns 503 when data is stale, so any
+#        external uptime monitor can watch it.
+#    Vercel cron is the documented fallback scheduler: once-daily is enough for
+#    a post-close job and it does not share this failure mode.
+#
+# Execution is not punctual. Delays of 10-30 minutes are normal and irrelevant
+# for an annual-filings job.
+
+name: ingest
+
+on:
+  schedule:
+    # 02:30 UTC daily — comfortably after any US market close, and away from
+    # the top of the hour where GitHub's queue is busiest.
+    - cron: "30 2 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  # Never two cycles at once. The writes are idempotent so overlap would be
+  # survivable, but it would double our request rate against the SEC.
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  incremental:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Apply migrations
+        run: |
+          PYTHONPATH=src python -c "
+          from investment_intelligence.db import connect, migrate
+          with connect() as c:
+              applied = migrate(c); c.commit()
+              print('applied:', applied or 'nothing pending')"
+
+      - name: Incremental ingestion
+        run: PYTHONPATH=src python -m investment_intelligence.cli incremental
+
+      # Runs even if ingestion failed, because a failed cycle still needs its
+      # health reported rather than being masked by the earlier step's exit.
+      - name: Ingestion health
+        if: always()
+        run: PYTHONPATH=src python -m investment_intelligence.cli health
