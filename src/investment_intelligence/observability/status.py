@@ -60,6 +60,15 @@ def snapshot(conn: psycopg.Connection) -> dict[str, Any]:
         FROM   ingestion_rejections
         GROUP  BY reason_class ORDER BY count(*) DESC
     """)
+    # Facts loaded but no metrics computed is a live-screen outage that
+    # nothing else detects: ingestion is healthy, quality checks pass, and
+    # every screen quietly returns nothing. It is what a backfill without a
+    # metric refresh leaves behind, and "no companies match your criteria" is
+    # an entirely ordinary thing for a screener to say.
+    derived = _rows(conn, """
+        SELECT (SELECT count(*) FROM financial_facts) AS facts,
+               (SELECT count(*) FROM metric_values)   AS metrics
+    """)
     coverage = _rows(conn, """
         SELECT count(DISTINCT instrument_id) AS instruments,
                count(*)                      AS facts,
@@ -74,10 +83,13 @@ def snapshot(conn: psycopg.Connection) -> dict[str, Any]:
     # inert.
     inert = [c["check_code"] for c in quality if c["evaluable"] == 0]
     unhealthy = [h for h in health if h["status"] != "OK"]
+    fact_count = derived[0]["facts"]
+    metric_count = derived[0]["metrics"]
+    metrics_stale = fact_count > 0 and metric_count == 0
 
     if not health:
         overall = "UNMONITORED"
-    elif any(a["severity"] == "CRITICAL" for a in open_alerts):
+    elif any(a["severity"] == "CRITICAL" for a in open_alerts) or metrics_stale:
         overall = "CRITICAL"
     elif unhealthy or inert:
         overall = "DEGRADED"
@@ -86,6 +98,9 @@ def snapshot(conn: psycopg.Connection) -> dict[str, Any]:
 
     return {
         "overall": overall,
+        "metrics_stale": metrics_stale,
+        "facts": fact_count,
+        "metric_values": metric_count,
         "health": health,
         "open_alerts": open_alerts,
         "inert_checks": inert,

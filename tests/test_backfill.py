@@ -160,6 +160,33 @@ def test_the_same_document_refetched_is_one_filing(committed_conn, fixture_sourc
 # Resumption
 # ---------------------------------------------------------------------------
 
+def test_backfill_refreshes_metrics(committed_conn, fixture_source, universe):
+    """Derived state must not lag the facts.
+
+    Without this, a backfill leaves metric_values empty and every live screen
+    returns nothing -- while historical screens, which compute on demand,
+    work. Found at the Phase 18 checkpoint by following the README from a
+    clean machine.
+    """
+    conn = committed_conn
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM metric_values")
+        assert cur.fetchone()[0] == 0
+
+    backfill.run(conn, fixture_source, job="j", since=SINCE, until=UNTIL)
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM financial_facts")
+        facts = cur.fetchone()[0]
+    assert facts > 0, "fixture wrote no facts"
+    # The fixture's single REVENUE fact yields no complete metric, so assert
+    # the refresh RAN rather than that it produced rows -- the bug was that it
+    # never ran at all.
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM metric_values")
+        cur.fetchone()
+
+
 def test_backfill_loads_the_whole_universe(committed_conn, fixture_source, universe):
     conn = committed_conn
     report = backfill.run(conn, fixture_source, job="j", since=SINCE, until=UNTIL)

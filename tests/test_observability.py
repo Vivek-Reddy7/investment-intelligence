@@ -230,6 +230,61 @@ def test_an_inert_quality_check_degrades_the_overall_verdict(wired):
     assert snap["overall"] != "OK"
 
 
+def test_facts_without_metrics_is_reported_as_critical(committed_conn, source_committed):
+    """Found at the Phase 18 checkpoint, by running the README from clean.
+
+    `make backfill` loaded facts and never refreshed `metric_values`, so every
+    LIVE screen returned nothing while historical screens -- which compute
+    from metrics_as_of() on demand -- worked perfectly. The headline feature
+    worked and the ordinary case was silently broken.
+
+    Nothing detected it: ingestion was healthy, quality checks passed, and the
+    symptom is "no companies match your criteria", which is an entirely
+    ordinary thing for a screener to say. This is the third time this project
+    has produced that exact shape.
+    """
+    conn = committed_conn
+    from datetime import date as _date
+
+    from conftest import add_fact as _add_fact, add_filing as _add_filing
+
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO instruments (isin) VALUES ('INE000STALE1') "
+                    "RETURNING instrument_id")
+        instrument_id = cur.fetchone()[0]
+        cur.execute("INSERT INTO ingestion_schedule (source_id, kind, max_age) "
+                    "VALUES (%s,'FUNDAMENTALS', interval '3 days')",
+                    (source_committed,))
+    filing = _add_filing(conn, instrument_id, source_committed,
+                         period_end=_date(2025, 3, 31), filed_at=utc(2025, 6, 1),
+                         ref="stale-metrics")
+    # Both, so a metric is actually computable — a single REVENUE fact yields
+    # nothing, which would leave metrics_stale true after a refresh and test
+    # the wrong thing.
+    for item, value in (("REVENUE", "1000"), ("NET_PROFIT", "100")):
+        _add_fact(conn, instrument_id, source_committed, filing, line_item=item,
+                  value=Decimal(value), fiscal_year=2025, period_type="ANNUAL",
+                  known_from=utc(2025, 6, 1),
+                  period_start=_date(2024, 4, 1), period_end=_date(2025, 3, 31))
+    conn.commit()
+
+    snap = status.snapshot(conn)
+    assert snap["metrics_stale"] is True
+    assert snap["overall"] == "CRITICAL", (
+        "facts with no metrics is a live-screen outage and must not read OK")
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT refresh_metric_values()")
+    conn.commit()
+    assert status.snapshot(conn)["metrics_stale"] is False
+
+
+def test_an_empty_store_is_not_reported_as_metrics_stale(committed_conn):
+    """No facts and no metrics is consistent, not broken. Flagging it would
+    make a fresh install look like an outage."""
+    assert status.snapshot(committed_conn)["metrics_stale"] is False
+
+
 def test_the_snapshot_reports_coverage_and_rejections(wired):
     conn, src, _ = wired
     incremental.run(conn, src, refresh_metrics=True)

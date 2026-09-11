@@ -76,6 +76,7 @@ class BackfillReport:
     instruments_failed: int = 0
     writes: WriteResult = field(default_factory=WriteResult)
     rejections: list[Rejection] = field(default_factory=list)
+    metrics_refreshed: int = 0
 
     @property
     def outcome(self) -> str:
@@ -186,12 +187,20 @@ def run(
     until: date,
     limiter: RateLimiter | None = None,
     max_instruments: int | None = None,
+    refresh_metrics: bool = True,
 ) -> BackfillReport:
     """Backfill outstanding instruments. Resume by calling again.
 
     `max_instruments` bounds one invocation, which is how this survives a
     scheduler with a job time limit: run a slice, commit, exit cleanly, and
     the next invocation picks up where it stopped.
+
+    `refresh_metrics` defaults on, and that default is a bug fix. Without it a
+    backfill loaded facts and left `metric_values` empty, so every LIVE screen
+    returned nothing while historical screens -- which compute from
+    `metrics_as_of()` on demand -- worked perfectly. The headline feature
+    worked and the ordinary case was silently broken, which is the third time
+    this project has produced exactly that shape.
     """
     limiter = limiter or RateLimiter(0.0)
     report = BackfillReport(job=job)
@@ -260,6 +269,14 @@ def run(
     # Rejections are persisted, not just counted. Phase 7 discarded 372
     # reasons because they lived only in this report object.
     rejection_log.record(conn, report.run_id, source.source_id, report.rejections)
+    # Derived state must not lag the facts. incremental.run has always done
+    # this; backfill did not, and nothing noticed because the failure looks
+    # like "no companies match your criteria".
+    if refresh_metrics:
+        with conn.cursor() as cur:
+            cur.execute("SELECT refresh_metric_values()")
+            report.metrics_refreshed = cur.fetchone()[0]
+
     _finish_run(conn, report.run_id, report)
     conn.commit()
     return report

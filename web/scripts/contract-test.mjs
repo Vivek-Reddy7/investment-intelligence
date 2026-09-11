@@ -89,6 +89,18 @@ console.log("\n/api/v1/explain");
   check("every row names its filing", body?.data?.every((r) => r.source_ref?.startsWith("http")));
   check("every row names its licence", body?.data?.every((r) => r.licence_note));
   check("every row carries known_from", body?.data?.every((r) => r.known_from));
+  // A DATE has no timezone, but `pg` hands it back as a JS Date, which then
+  // serialises through the server's offset. In IST that turned FY2019's
+  // 2019-03-31 into "2019-03-30T18:30:00.000Z", moving a full-year figure to
+  // the wrong year end on the endpoint whose whole job is provenance. The
+  // Python suite cannot catch this: the shift happens in the JS driver,
+  // downstream of the database.
+  check("period dates are plain dates, not shifted timestamps",
+    body?.data?.every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.period_end)),
+    `got ${body?.data?.[0]?.period_end}`);
+  check("the period end is the one the database holds",
+    body?.data?.every((r) => r.period_end === "2019-03-31"),
+    `got ${body?.data?.[0]?.period_end}`);
 }
 
 console.log("\n/api/v1/company/:id");

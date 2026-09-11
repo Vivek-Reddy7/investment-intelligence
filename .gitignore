@@ -37,3 +37,7 @@ web/.next/
 web/.env.local
 web/next-env.d.ts
 web/tsconfig.tsbuildinfo
+
+# Coverage data: a binary artifact rewritten by every test run.
+.coverage
+htmlcov/

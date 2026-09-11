@@ -117,6 +117,7 @@ def cmd_backfill(args: argparse.Namespace) -> None:
     print(f"  facts written={report.writes.facts_written} "
           f"unchanged={report.writes.facts_unchanged} "
           f"filings={report.writes.filings_written}")
+    print(f"  metrics refreshed={report.metrics_refreshed}")
     if report.rejections:
         print(f"  rejections={len(report.rejections)}; first few:")
         for rejection in report.rejections[:5]:
@@ -197,6 +198,11 @@ def cmd_status(args: argparse.Namespace) -> None:
         snap = status_mod.snapshot(conn)
 
     print(f"OVERALL: {snap['overall']}")
+
+    if snap.get("metrics_stale"):
+        print(f"\n!! {snap['facts']} facts loaded but metric_values is EMPTY.")
+        print("   Every live screen will return nothing while historical")
+        print("   screens still work. Fix with:  make incremental")
 
     if snap["open_alerts"]:
         print("\nOPEN ALERTS")

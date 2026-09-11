@@ -387,7 +387,14 @@ export async function explain(factIds: number[]) {
   if (factIds.length > 50) throw new BadRequest("too many fact ids");
   const { rows } = await pool.query(`
     SELECT f.fact_id, f.line_item, f.value::text AS value, f.currency,
-           f.fiscal_year, f.period_type, f.period_start, f.period_end,
+           f.fiscal_year, f.period_type,
+           -- ::text for the reason given on the coverage query above. It
+           -- matters more here: this endpoint exists to say which period a
+           -- figure describes, and IST rendered FY2019's 2019-03-31 as
+           -- "2019-03-30", attributing a full-year figure to the wrong
+           -- year end on the one screen whose job is provenance.
+           f.period_start::text AS period_start,
+           f.period_end::text   AS period_end,
            f.known_from, fl.source_ref, fl.filed_at, fl.filing_type,
            s.source_id, s.licence_note, s.licence_url
     FROM   financial_facts f
