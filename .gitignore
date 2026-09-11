@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+
+# Environment and secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+data/
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
