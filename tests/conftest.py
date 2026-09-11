@@ -9,6 +9,7 @@ same write path the real ingestion uses, privileges and triggers included.
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 
 import psycopg
@@ -44,6 +45,27 @@ def conn(migrated_db: str):
         connection.close()
 
 
+@contextmanager
+def app_role(conn):
+    """Run a block as `ii_app`, the role the web app actually uses.
+
+    This exists because **superusers bypass row level security entirely**, and
+    the test harness connects as the database owner, which on a local install
+    is a superuser. Isolation tests written without this pass whether or not
+    the policies exist -- they were proving nothing.
+
+    `SET LOCAL ROLE` is transaction-scoped, so it cannot leak into the next
+    test on a reused connection.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SET LOCAL ROLE ii_app")
+    try:
+        yield conn
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("RESET ROLE")
+
+
 def _reset_schema(dsn: str) -> None:
     """Drop and rebuild the schema from migrations.
 
@@ -59,6 +81,15 @@ def _reset_schema(dsn: str) -> None:
     with psycopg.connect(dsn) as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
+            # Both schemas. Dropping only `public` left `app` behind, so
+            # re-running migration 020 hit an existing schema -- 94 cascading
+            # errors from one incomplete reset.
+            #
+            # Roles are NOT dropped, deliberately: they are cluster-wide
+            # rather than per-database, so dropping them could break another
+            # database in the same cluster. That is why every CREATE ROLE in a
+            # migration is guarded against pg_roles instead.
+            cur.execute("DROP SCHEMA IF EXISTS app CASCADE")
             cur.execute("DROP SCHEMA public CASCADE")
             cur.execute("CREATE SCHEMA public")
     with psycopg.connect(dsn) as conn:

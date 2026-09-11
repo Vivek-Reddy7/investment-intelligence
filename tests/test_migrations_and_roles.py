@@ -51,6 +51,23 @@ def test_editing_an_applied_migration_is_detected(conn, tmp_path: Path):
         migrate(conn, tmp_path)
 
 
+def test_every_create_role_is_guarded(conn):
+    """Roles are cluster-wide, not per-database, so a bare CREATE ROLE breaks
+    on any re-application -- a second database in the same cluster, or the
+    test harness rebuilding the schema.
+
+    Migration 007 guarded for this; 020 did not, and the harness caught it on
+    the first run. Asserted here so the third one cannot repeat it.
+    """
+    for migration in discover():
+        sql = migration.sql
+        if "CREATE ROLE" not in sql.upper():
+            continue
+        assert "pg_roles" in sql, (
+            f"{migration.filename}: CREATE ROLE without an IF NOT EXISTS guard "
+            "against pg_roles")
+
+
 def test_no_migration_contains_a_down_step(conn):
     """Forward only, deliberately. A rollback that drops a column drops facts,
     and the facts are the product."""
@@ -139,11 +156,20 @@ DELETABLE_TABLES = {"metric_values", "quality_findings"}
 
 @pytest.mark.parametrize("role", ["ii_app", "ii_ingest"])
 def test_delete_is_granted_only_on_derived_tables(conn, role):
+    """Scoped to `public`, the market schema.
+
+    The `app` schema is a different regime and deliberately so: a user
+    deleting their own watchlist is ordinary, and nothing there records what a
+    company reported. Migration 020 put user data in its own schema partly to
+    make that boundary statable rather than having to special-case a growing
+    list of table names here.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT table_name FROM information_schema.role_table_grants
             WHERE  grantee = %s AND privilege_type = 'DELETE'
+              AND  table_schema = 'public'
             """,
             (role,),
         )
@@ -186,15 +212,59 @@ def test_the_owner_can_delete_but_the_trigger_stops_it(conn, seeded):
         cur.execute("DELETE FROM financial_facts")
 
 
-def test_app_role_is_granted_no_update_on_fact_tables(conn):
+def test_app_role_cannot_write_market_data(conn):
+    """The serving path writes nothing in `public`, so a bug in the read API
+    cannot corrupt the store. It writes freely in `app`, which is the point of
+    the schema split -- see the next test."""
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT table_name FROM information_schema.role_table_grants
             WHERE  grantee = 'ii_app' AND privilege_type IN ('UPDATE', 'INSERT')
+              AND  table_schema = 'public'
             """
         )
         assert cur.fetchall() == []
+
+
+def test_app_role_can_write_user_data(conn):
+    """The asymmetry stated positively, so it reads as a decision rather than
+    an oversight in the test above.
+
+    Market data is append-only history; user data is mutable state a person
+    owns. `ii_app` needs full CRUD on the second and none on the first, and
+    row level security -- not privileges -- is what keeps users apart.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT privilege_type
+            FROM   information_schema.role_table_grants
+            WHERE  grantee = 'ii_app' AND table_schema = 'app'
+            """
+        )
+        granted = {row[0] for row in cur.fetchall()}
+    assert {"SELECT", "INSERT", "UPDATE", "DELETE"} <= granted
+
+
+def test_row_level_security_is_enabled_and_forced_on_every_user_table(conn):
+    """Enabled is not enough: without FORCE, the table owner bypasses the
+    policies, and on a managed database the owner is often the role the
+    application connects as."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+            FROM   pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE  n.nspname = 'app' AND c.relkind = 'r'
+              AND  c.relname NOT IN ('sessions', 'login_tokens', 'alert_state')
+            """
+        )
+        rows = cur.fetchall()
+    assert rows
+    for name, enabled, forced in rows:
+        assert enabled, f"{name}: row level security not enabled"
+        assert forced, f"{name}: row level security not FORCEd"
 
 
 def test_ingest_role_can_insert_but_not_update_facts(conn, seeded):

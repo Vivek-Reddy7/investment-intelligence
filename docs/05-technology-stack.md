@@ -264,3 +264,55 @@ proves insufficient.
 - [x] ADR 006 web stack — Next.js on Vercel, with verified Hobby limits
 - [ ] Auth ADR — deliberately deferred to phase 13
 - [x] Phase 6 may begin
+
+---
+
+## ADR 007 — Authentication by emailed magic link
+
+*Settled 2026-09-11, deferred here from ADR 002 because Neon does not bundle
+auth.*
+
+**Decision.** Sign-in by single-use emailed link. **No passwords anywhere** —
+no column, no hashing, no comparison, no transport, no reset flow.
+
+**Why.** Every password failure mode disappears rather than being mitigated:
+reuse across sites, weak choices, a leaked hash to crack, a reset flow to
+abuse, and the risk of ever handling one in plaintext. The cost is a
+dependency on email delivery, which is a smaller and more visible problem than
+the one it replaces.
+
+It also matters for what this project is. Phase 21 will hold broker
+credentials. Starting from a posture of never storing a secret we could
+reconstruct is the right footing for that, and a password table would have set
+the opposite precedent.
+
+**Alternatives considered.**
+
+- *Auth.js / NextAuth with a database adapter.* A reasonable wrapper around
+  the same magic-link flow. Rejected for now because the flow is roughly 150
+  lines and owning it means the session model, the hashing and the RLS
+  integration are all visible in one place. Revisit if we add OAuth providers,
+  where a library genuinely earns its keep.
+- *Clerk or Auth0 free tier.* Least code, and both would work. Rejected
+  because a hosted identity provider owns the user table, and RLS keyed on our
+  own `user_id` is the mechanism keeping users apart — introducing an external
+  id mapping in the middle of that is a needless seam in the one place a
+  mistake leaks data.
+- *Passwords.* Declined. See above.
+
+**Consequences.**
+
+- **An email sender is required at deploy.** Nothing is wired, because it
+  needs an account key. Sending is deliberately a separate step from firing
+  (`alerts.pending_deliveries`), so a fired alert and an issued login link are
+  both durable before any provider is involved.
+- Tokens are 256 bits from `secrets`, stored as SHA-256 digests and looked up
+  *by* digest, so no candidate value is ever compared in application code.
+- A plain digest rather than a slow KDF, deliberately: these are high-entropy
+  random tokens, not guessable secrets, so a work factor would be cost without
+  benefit.
+- Login links live 15 minutes because they sit in an inbox; sessions live 30
+  days because they sit in a cookie jar.
+
+**Revisit when.** We want OAuth ("sign in with Google"), at which point a
+library is worth the dependency.
