@@ -361,3 +361,55 @@ This document is engineering research, not legal advice. The §3.1 distinction
 between exchange-transmitted data and the underlying facts, and the §4.3
 reading of Indian copyright law, both warrant a qualified opinion before the
 platform is publicly accessible.
+
+---
+
+## 6. Addendum (Phase 7) — no affordable programmatic filings source found
+
+Phase 3 established that company filings are *legally* usable (§4). Phase 7
+needed a *mechanism*, and that is a separate question which turns out to be
+unresolved.
+
+### 6.1 Official exchange APIs are priced out of reach
+
+BSE and NSE both offer corporate-announcement and filings API subscriptions.
+Reported pricing is **on the order of ₹20 lakh per year per exchange**. That
+is two orders of magnitude beyond anything this project can justify.
+
+*Figure from secondary sources (developer forum discussion), not from an
+exchange price list. Treat as an order of magnitude, not a quotation. The
+conclusion does not depend on precision: it is not ₹0 and not close.*
+
+### 6.2 Unofficial APIs and scrapers are excluded by instruction
+
+Several exist and are widely used — `BseIndiaApi` describes itself as "an
+unofficial Python API", plus various scraper services. These are **out of
+scope by explicit instruction**: no scraping, no reverse-engineering, no
+violating terms of service. They are not listed as fallbacks because they are
+not options.
+
+### 6.3 What remains, unverified
+
+| Route | Cost | Difficulty | Status |
+|---|---|---|---|
+| Company websites — statements companies must publish themselves (SEBI LODR Reg 33/47) | ₹0 | **High** — ~500 different sites, layouts and formats | Legally cleanest; engineering-heaviest |
+| Commercial fundamentals APIs (several India-focused vendors exist) | Unknown | Low | **Terms and pricing unread** |
+| Written request to BSE/NSE for non-commercial access | ₹0? | Low | Untried. NSE's own non-commercial clause (§3.2) requires confidentiality, so likely closed |
+| XBRL filings via exchange portals | ₹0? | Medium | Access route for *consumers* unconfirmed; portals are built for companies filing |
+
+### 6.4 Consequence for Phase 7
+
+**Phase 7 cannot fully exit.** Its exit criterion — "full universe loaded with
+target history depth" — requires a source.
+
+What the phase *did* deliver is everything that does not depend on which
+source wins: the adapter interface, boundary validation, the idempotent
+versioned writer, and a resumable rate-limited backfill engine, all tested
+against a fixture source. That is deliberate rather than a consolation. The
+behaviours that matter — resumption after interruption, no re-fetching of
+completed work, gap enumeration — cannot be tested against a live provider at
+all, because you cannot ask a real API to fail on the fourth company or to
+restate a figure on demand.
+
+The concrete adapter is a single file behind a stable interface, which is
+exactly what architecture §2.2 was designed to make true.

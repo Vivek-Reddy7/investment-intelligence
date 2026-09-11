@@ -44,10 +44,68 @@ def conn(migrated_db: str):
         connection.close()
 
 
+def _reset_schema(dsn: str) -> None:
+    """Drop and rebuild the schema from migrations.
+
+    Needed because the backfill engine commits, and it has to: an uncommitted
+    checkpoint is not a checkpoint, so rollback isolation cannot be used to
+    test the thing whose entire purpose is surviving a crash.
+
+    DROP SCHEMA is DDL and bypasses the append-only triggers, which protect
+    against DML. That is the correct boundary -- in production the application
+    roles do not own the schema, so they cannot do this. It is available here
+    only because the test harness connects as the owner.
+    """
+    with psycopg.connect(dsn) as conn:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("DROP SCHEMA public CASCADE")
+            cur.execute("CREATE SCHEMA public")
+    with psycopg.connect(dsn) as conn:
+        migrate(conn)
+        conn.commit()
+
+
+@pytest.fixture
+def committed_conn(migrated_db: str):
+    """A connection for code that commits. Schema is rebuilt around each test.
+
+    Reset on the way in and on the way out: on the way in so a previous test's
+    committed rows are gone, and on the way out so the rollback-isolated tests
+    in other modules do not inherit them.
+    """
+    _reset_schema(migrated_db)
+    connection = psycopg.connect(migrated_db)
+    connection.autocommit = False
+    try:
+        yield connection
+    finally:
+        connection.rollback()
+        connection.close()
+        _reset_schema(migrated_db)
+
+
 @pytest.fixture
 def source(conn) -> str:
     """A source row. Required by every fact, by design (see 001_sources.sql)."""
     with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO sources (source_id, name, kind, licence_note,
+                                 redistributable, verified_on)
+            VALUES ('TEST_FILINGS', 'Test filings', 'FILINGS',
+                    'Test fixture. Not a real licence position.', true, %s)
+            ON CONFLICT (source_id) DO NOTHING
+            """,
+            (date(2026, 9, 11),),
+        )
+    return "TEST_FILINGS"
+
+
+@pytest.fixture
+def source_committed(committed_conn) -> str:
+    """The `source` fixture, against the committing connection."""
+    with committed_conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO sources (source_id, name, kind, licence_note,
