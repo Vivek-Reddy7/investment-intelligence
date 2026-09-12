@@ -1,7 +1,8 @@
 # Point-in-time fundamentals screener
 
-*(working name — the project name is still open, see
-[docs/01-vision-and-scope.md](docs/01-vision-and-scope.md) §8.4)*
+*Investment-Intelligence — see
+[docs/01-vision-and-scope.md](docs/01-vision-and-scope.md) §8.4 for why the
+name took seventeen phases to settle.*
 
 Screen company fundamentals **as of any past date**, using only the figures
 that were known on that date.

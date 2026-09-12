@@ -230,10 +230,16 @@ prices and fundamentals and is likely the hardest single item in Phase 5. If
 we cannot source it, the honest fallback is a universe defined by our own
 observed listing data rather than by index membership.
 
-**8.4 Project name — pending.** A shorter name is being chosen.
-`investment-intelligence` remains the working directory name until then.
-Renaming is cheap now and expensive once the repository is public and linked
-from a CV, so this blocks publication but not Phase 2.
+**8.4 Project name — settled 2026-09-12: Investment-Intelligence.** The
+working directory name became the real one. Shorter coined alternatives were
+considered and dropped: this name says what the project is to someone scanning
+a CV, which is the audience that matters, where an invented word would have
+needed a sentence of explanation every time it appeared.
+
+The decision sat open for seventeen phases on the stated grounds that renaming
+is cheap before publication and expensive after. It was taken immediately
+before the repository went public, which was the last moment it was still
+cheap — deferring it that long was deliberate, not neglect.
 
 ---
 
@@ -241,5 +247,5 @@ from a CV, so this blocks publication but not Phase 2.
 
 - [x] Sections 3 and 5 signed off — the non-goals matter more than the goals
 - [x] Open decisions 8.1, 8.2, 8.3 answered
-- [ ] Project name chosen (blocks publication, not Phase 2)
+- [x] Project name chosen (blocked publication, not Phase 2) — 8.4
 - [x] Phase 2 may begin
