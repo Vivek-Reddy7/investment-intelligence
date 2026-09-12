@@ -19,12 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-Note on data. This licence covers the software in this repository, not the
-data it retrieves. Financial facts are fetched at runtime from SEC EDGAR,
-whose public filing content the SEC states is free to access and reuse
-(https://www.sec.gov/os/webmaster-faq). No third-party market data is
-redistributed by this project; see docs/03-data-sources.md for why Indian
-exchange prices are absent entirely.

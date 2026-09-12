@@ -174,3 +174,14 @@ standalone project: a market data pipeline and backtesting engine. The two
 share ideas — idempotent ingestion, validation at the boundary, reconciling
 derived state against a log — and are deliberately separate codebases with
 separate lifecycles. Neither imports the other.
+
+## Licence
+
+[MIT](LICENSE), which covers the software and not the data.
+
+No third-party market data is redistributed here. Financial facts are fetched
+at runtime from SEC EDGAR, whose public filing content the SEC states is *"free
+to access and reuse"* ([webmaster FAQ](https://www.sec.gov/os/webmaster-faq)).
+Indian exchange prices are absent entirely, and
+[docs/03-data-sources.md](docs/03-data-sources.md) explains why that was a
+licensing decision rather than an oversight.
