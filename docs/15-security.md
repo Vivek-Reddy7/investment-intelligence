@@ -72,20 +72,35 @@ protocol — plus around thirty other advisories against Next 15.5.4.
 
 Fixed by a non-breaking bump to **15.5.25**. Build and typecheck unaffected.
 
-### 4.1 Three advisories deliberately not fixed
+### 4.1 What was fixed, and what was deliberately not
 
-What remains needs Next **16**, a major version. Rather than take that
-reflexively, each was checked against what this app actually does:
+Re-checked 2026-09-12, when the repository went public — a private audit
+finding and a public one are the same finding, but the second is read by
+strangers, so the reasoning has to stand up.
+
+**Fixed.** `sharp` moved 0.34.5 → 0.35.4 via `npm audit fix`, no breaking
+change. It was never reachable — `sharp` is transitive through Next and this
+app has zero `next/image` uses — but a fix that costs nothing should be taken
+rather than argued about. Reachability analysis is for advisories where the fix
+has a cost; when it is free, take the fix.
+
+**Not fixed.** What remains needs Next **16**, a major version, and was checked
+against what this app actually does rather than upgraded reflexively:
 
 | Advisory | Requires | Present here? |
 |---|---|---|
-| `postcss` XSS + arbitrary `.map` read via `sourceMappingURL` | Attacker-influenced CSS processed at build | **No.** No `postcss.config`, and the only CSS is a static file we wrote. Build-time, not runtime |
-| `sharp` libvips/libheif CVEs | Image processing | **No.** Zero `next/image` uses; `sharp` is transitive and never invoked |
+| `postcss` XSS + arbitrary `.map` read via `sourceMappingURL` | Attacker-influenced CSS processed at build | **No.** No `postcss.config`, and the only CSS is `web/app/globals.css`, which we wrote. Build-time, not runtime — an attacker would need commit access, at which point postcss is not the problem |
 | `next` moderate | Server Actions / middleware / rewrites / i18n | **No.** Zero `use server`, no `middleware.ts`, no rewrites, no i18n |
 
-So all three target code paths that do not exist in this application. Deferred
-with that reasoning recorded, and revisited when Next 16 is taken for its own
-reasons.
+Both target code paths that do not exist here. Deferred with the reasoning
+recorded, and revisited when Next 16 is taken for its own reasons — a major
+bump taken *for* an unreachable advisory trades a theoretical risk for a real
+one.
+
+The GitHub Actions used by CI are pinned to their current majors
+(`checkout@v7`, `setup-node@v7`, `setup-python@v7`). The previous pins still
+ran, but on a Node version GitHub has deprecated — a workflow that works today
+and breaks on a runner upgrade is a problem deferred, not avoided.
 
 ### 4.2 Why the audit job does not block
 
