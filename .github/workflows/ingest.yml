@@ -44,16 +44,43 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
+      # Before Phase 12 is wired there is no DATABASE_URL secret, and every
+      # nightly run failed on it -- six consecutive red runs on a public
+      # repository for a condition nobody could act on from inside CI.
+      #
+      # That is the exact failure ci.yml already argues against: a build that
+      # goes red for something unactionable teaches people to ignore red, and
+      # the next real failure is ignored too. "Not configured yet" is a
+      # different state from "broken", and only one of them is news.
+      #
+      # Skipping is safe because it cannot hide a genuine outage. Once the
+      # secret exists this guard never fires again, and staleness is detected
+      # out of band by GET /api/v1/health, which does not depend on this
+      # workflow running at all.
+      - name: Is deployment configured?
+        id: configured
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No DATABASE_URL secret — Phase 12 is not wired yet, so there is nothing to ingest into. Skipping rather than failing. See docs/12-deployment.md."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v7
+        if: steps.configured.outputs.ready == 'true'
 
       - uses: actions/setup-python@v7
+        if: steps.configured.outputs.ready == 'true'
         with:
           python-version: "3.12"
           cache: pip
 
       - run: pip install -r requirements.txt
+        if: steps.configured.outputs.ready == 'true'
 
       - name: Apply migrations
+        if: steps.configured.outputs.ready == 'true'
         run: |
           PYTHONPATH=src python -c "
           from investment_intelligence.db import connect, migrate
@@ -62,10 +89,13 @@ jobs:
               print('applied:', applied or 'nothing pending')"
 
       - name: Incremental ingestion
+        if: steps.configured.outputs.ready == 'true'
         run: PYTHONPATH=src python -m investment_intelligence.cli incremental
 
       # Runs even if ingestion failed, because a failed cycle still needs its
       # health reported rather than being masked by the earlier step's exit.
+      # Still gated on being configured: with no database there is no health
+      # to report, only a second way to say the same thing.
       - name: Ingestion health
-        if: always()
+        if: always() && steps.configured.outputs.ready == 'true'
         run: PYTHONPATH=src python -m investment_intelligence.cli health
