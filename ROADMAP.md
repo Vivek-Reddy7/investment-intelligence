@@ -173,7 +173,11 @@ where the wedge becomes visible to a user rather than a property of the store.
 **Exit:** A stranger can screen the universe and read a company page without
 being told how, and can see where every number came from.
 
-### Phase 12 — Free-tier deployment · **MVP MILESTONE**
+### Phase 12 — Free-tier deployment · **IN PROGRESS** · **MVP MILESTONE**
+*Design, connection topology and setup script done —
+[docs/12-deployment.md](docs/12-deployment.md). What remains needs a Neon
+project and a Vercel account, which are the only parts of this project that
+cannot be written down here.*
 **Build:** Public hosting, scheduled job execution, managed database, domain.
 **Why:** A project that only runs locally is not a product, and free-tier
 deployment has its own failure modes — sleeping databases, schedulers that

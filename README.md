@@ -140,6 +140,7 @@ and why — including what turned out to be wrong.
 | [08 Incremental ingestion](docs/08-incremental-ingestion.md) | The daily job, and detecting a run that did not happen |
 | [09 Analytics](docs/09-analytics-and-screening.md) | Metrics, provenance, point-in-time screening |
 | [10–11 API and frontend](docs/10-11-api-and-frontend.md) | The read API and the site |
+| [12 Deployment](docs/12-deployment.md) | Neon, Vercel, and why a scheduler cannot watch itself |
 | [13 Accounts](docs/13-accounts.md) | Magic-link auth, row level security, alerts |
 | [14 Testing strategy](docs/14-testing-strategy.md) | The 24 invisible failures and their tests |
 | [15 Security](docs/15-security.md) | Threat model for the actual attack surface |
