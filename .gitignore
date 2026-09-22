@@ -41,3 +41,8 @@ web/tsconfig.tsbuildinfo
 # Coverage data: a binary artifact rewritten by every test run.
 .coverage
 htmlcov/
+
+# scripts/local_factor_report.py's output. Generated, not source, and it
+# embeds yfinance-sourced price data -- see docs/03-data-sources.md §7 for
+# why that must never end up in a public commit either.
+local-only/
