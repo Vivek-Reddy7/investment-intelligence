@@ -74,7 +74,9 @@ EXPECTED_GRANTS = {
                        # local-research-only (clean SEC filer metadata, no
                        # price involved) but is still ii_ingest-written like
                        # everything else here; market_cap_snapshots is.
-                       "sector_classifications", "market_cap_snapshots"},
+                       "sector_classifications", "market_cap_snapshots",
+                       # Migration 029.
+                       "backtest_results"},
             "UPDATE": {"ingestion_runs", "tracked_instruments", "sources",
                        "line_items", "instrument_external_ids",
                        "ingestion_schedule",
@@ -84,7 +86,9 @@ EXPECTED_GRANTS = {
                        # is a store of raw, never-revised prints.
                        "factor_scores", "technical_indicators",
                        # Migrations 027/028: also recomputable on rerun.
-                       "sector_classifications", "market_cap_snapshots"},
+                       "sector_classifications", "market_cap_snapshots",
+                       # Migration 029: also recomputable on rerun.
+                       "backtest_results"},
             "DELETE": {"metric_values", "quality_findings"},
         },
         # Invariant 8: nothing at all on the user domain.

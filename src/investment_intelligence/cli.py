@@ -25,7 +25,7 @@ from investment_intelligence.observability import logging as structured
 from investment_intelligence.observability import status as status_mod
 from investment_intelligence.ingest import price_writer
 from investment_intelligence.analytics import (
-    combined_score, factor_score, market_cap, sizing, technicals,
+    backtest, combined_score, factor_score, market_cap, sizing, technicals,
 )
 from investment_intelligence.sources import classification
 from investment_intelligence.sources.edgar import EdgarSource
@@ -450,6 +450,52 @@ def cmd_marketcap(args: argparse.Namespace) -> None:
         print(f"  {ticker:6s} ${cap:>20,.0f}")
 
 
+def cmd_backtest(args: argparse.Namespace) -> None:
+    """Recompute the combined score at each historical checkpoint between
+    --since and --until, and check what each ranked instrument's price
+    actually did over the following --forward-days. Reports the pooled
+    information coefficient -- see analytics/backtest.py's module docstring
+    for the full method and its honest caveats. LOCAL RESEARCH ONLY."""
+    since = date.fromisoformat(args.since)
+    until = date.fromisoformat(args.until)
+    forward_days = args.forward_days
+    every_days = args.every_days
+
+    checkpoints = []
+    d = since
+    while d <= until:
+        checkpoints.append(d)
+        d = date.fromordinal(d.toordinal() + every_days)
+
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT i.instrument_id, x.value FROM instruments i "
+                "JOIN instrument_external_ids x ON x.instrument_id = i.instrument_id "
+                "AND x.scheme = 'US_TICKER'"
+            )
+            id_to_ticker = dict(cur.fetchall())
+
+        points = backtest.run(conn, list(id_to_ticker), checkpoints, forward_days)
+        written = backtest.store(conn, points)
+        conn.commit()
+
+    ic = backtest.information_coefficient(points)
+    print(f"{len(checkpoints)} checkpoints ({since} to {until}, every {every_days}d), "
+          f"{forward_days}d forward window\n")
+    print(f"{written} (as_of, instrument) points computed and stored\n")
+    if ic["ic"] is None:
+        print(f"information coefficient: undefined -- {ic['note']}")
+    else:
+        print(f"information coefficient: {ic['ic']:+.3f}")
+        print(f"  {ic['note']}")
+        direction = ("higher-ranked names tended to do BETTER afterward" if ic["ic"] > 0.1 else
+                     "higher-ranked names tended to do WORSE afterward" if ic["ic"] < -0.1 else
+                     "no clear relationship between rank and what happened next")
+        print(f"  reading: {direction}")
+
+
+
 def cmd_incremental(args: argparse.Namespace) -> None:
     """The daily job. Cheap, and its real output is the run-log row."""
     limiter = backfill.RateLimiter(0.5)
@@ -710,6 +756,15 @@ def main(argv: list[str] | None = None) -> None:
     mc = sub.add_parser("marketcap", help="compute market cap, local research only")
     mc.add_argument("--as-of", default="today", dest="as_of")
     mc.set_defaults(func=cmd_marketcap)
+
+    bt = sub.add_parser("backtest", help="validate the combined score against actual forward returns")
+    bt.add_argument("--since", default="2017-01-01")
+    bt.add_argument("--until", default="2026-03-01",
+                    help="last checkpoint -- must be forward-days before today, or the "
+                         "final points will not have a resolved forward return")
+    bt.add_argument("--every-days", type=int, default=180, dest="every_days")
+    bt.add_argument("--forward-days", type=int, default=180, dest="forward_days")
+    bt.set_defaults(func=cmd_backtest)
 
     inc = sub.add_parser("incremental")
     inc.add_argument("--lookback", type=int, default=2,

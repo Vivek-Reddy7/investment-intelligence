@@ -29,7 +29,7 @@ from pathlib import Path
 
 import psycopg
 
-from investment_intelligence.analytics import combined_score, factor_score
+from investment_intelligence.analytics import backtest, combined_score, factor_score
 
 OUT_DIR = Path(__file__).parent.parent / "local-only"
 OUT_FILE = OUT_DIR / "factor_report.html"
@@ -171,9 +171,24 @@ def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[st
       {partial_section}"""
 
 
+def _backtest_block(summary: dict | None) -> str:
+    if summary is None or summary.get("n", 0) == 0:
+        return '<p class="note">No backtest run yet -- `make backtest`.</p>'
+    if summary["ic"] is None:
+        return f'<p class="note">{summary["note"]}</p>'
+    ic = summary["ic"]
+    colour = "#7ee787" if ic > 0.1 else "#e77e7e" if ic < -0.1 else "#999"
+    return f"""
+      <div class="ic-box">
+        <span class="ic-value" style="color:{colour}">{ic:+.3f}</span>
+        <span class="ic-label">information coefficient</span>
+      </div>
+      <p class="note">{summary['note']}</p>"""
+
+
 def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
            technicals_by_ticker: dict[str, dict], sector_by_ticker: dict[str, tuple],
-           cap_by_ticker: dict[str, tuple]) -> str:
+           cap_by_ticker: dict[str, tuple], backtest_summary: dict | None) -> str:
     as_of = (combined_rows or fundamental_rows or [(None, None, None, date.today())])[0][3]
 
     fundamental_section = _section(
@@ -228,6 +243,9 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
                     font-size:12.5px; color:#666; font-style:italic; }}
   .meta {{ padding:0 16px 10px; font-size:12px; color:#8a8a8a; }}
   .meta i {{ color:#666; font-style:italic; }}
+  .ic-box {{ display:flex; align-items:baseline; gap:10px; margin:14px 0 6px; }}
+  .ic-value {{ font-size:28px; font-weight:700; font-variant-numeric:tabular-nums; }}
+  .ic-label {{ color:#999; font-size:13px; }}
 </style></head>
 <body>
   <div class="banner">
@@ -243,9 +261,22 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
   </div>
   <h1>Investment scores</h1>
   <div class="as-of">as of {as_of}</div>
+
+  <h2>Backtest -- does the combined score actually predict anything?</h2>
+  <div class="sub2">rank correlation between composite_score and actual forward
+    return, pooled across every historical checkpoint &middot; see
+    analytics/backtest.py for method and caveats</div>
+  {_backtest_block(backtest_summary)}
+
   {fundamental_section}
   {combined_section}
 </body></html>"""
+
+
+BACKTEST_QUERY = """
+    SELECT instrument_id, as_of, model_version, composite_score, forward_days, forward_return
+    FROM backtest_results WHERE model_version = %s
+"""
 
 
 def main() -> None:
@@ -261,13 +292,20 @@ def main() -> None:
             sector_by_ticker = {t: (sector, sic) for t, sector, sic in cur.fetchall()}
             cur.execute(MARKET_CAP_QUERY)
             cap_by_ticker = {t: (cap, currency) for t, cap, currency in cur.fetchall()}
+            cur.execute(BACKTEST_QUERY, (backtest.MODEL_VERSION,))
+            backtest_points = [
+                backtest.BacktestPoint(instrument_id=iid, as_of=as_of, composite_score=score,
+                                       forward_days=fd, forward_return=fr)
+                for iid, as_of, _mv, score, fd, fr in cur.fetchall()
+            ]
+            backtest_summary = backtest.information_coefficient(backtest_points)
 
     if not fundamental_rows and not combined_rows:
         raise SystemExit("no factor_scores rows -- run `make factors` and `make combined` first")
 
     OUT_DIR.mkdir(exist_ok=True)
     OUT_FILE.write_text(render(fundamental_rows, combined_rows, technicals_by_ticker,
-                               sector_by_ticker, cap_by_ticker))
+                               sector_by_ticker, cap_by_ticker, backtest_summary))
     print(f"wrote {OUT_FILE} ({len(fundamental_rows)} fundamental-only, "
           f"{len(combined_rows)} combined, {len(technicals_by_ticker)} with technicals, "
           f"{len(sector_by_ticker)} with sector, {len(cap_by_ticker)} with market cap)")

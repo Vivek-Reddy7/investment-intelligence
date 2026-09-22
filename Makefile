@@ -41,6 +41,7 @@ help:
 	@echo "           make combined    — blend fundamentals + technicals into one score"
 	@echo "           make sectors     — fetch SIC/sector classification (not local-only)"
 	@echo "           make marketcap   — compute market cap (no cap-tier label, see migration 028)"
+	@echo "           make backtest    — validate the combined score against actual forward returns"
 	@echo "           make size AMOUNT=5000 — split an amount across the top-ranked names"
 	@echo "           make factor-report — regenerate and open the local-only viewer"
 
@@ -133,6 +134,13 @@ sectors:
 
 marketcap:
 	$(PY) -m investment_intelligence.cli marketcap --as-of today
+
+# Recomputes combined scores at ~19 historical checkpoints (2017-2026) and
+# checks them against actual subsequent price moves. Takes longer than the
+# other targets -- it is re-running the full scoring pipeline once per
+# checkpoint, not one now-only pass.
+backtest:
+	$(PY) -m investment_intelligence.cli backtest
 
 # AMOUNT and CURRENCY are make variables, not shell args: `make size AMOUNT=500`.
 AMOUNT   ?= 5000
