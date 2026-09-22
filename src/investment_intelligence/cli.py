@@ -22,10 +22,38 @@ from investment_intelligence.ingest import backfill, incremental
 from investment_intelligence.ingest import rejections as rejection_log
 from investment_intelligence.observability import logging as structured
 from investment_intelligence.observability import status as status_mod
+from investment_intelligence.ingest import price_writer
+from investment_intelligence.analytics import factor_score
 from investment_intelligence.sources.edgar import EdgarSource
+from investment_intelligence.sources.prices import YFinancePriceSource
 
 SOURCE_ID = "SEC_EDGAR"
 JOB = "edgar-stage-one"
+
+PRICE_SOURCE_ID = "YAHOO_FINANCE"
+
+# redistributable=False is load-bearing, not decorative: see migration 024
+# and docs/03-data-sources.md §7. This source's data is fetched and stored
+# for local research/pipeline validation only, and must not be served by the
+# public web app until this row's terms change or the source is replaced.
+PRICE_SOURCE_ROW = dict(
+    source_id=PRICE_SOURCE_ID,
+    name="Yahoo Finance (via yfinance, unofficial)",
+    kind="MARKET_DATA_VENDOR",
+    licence_note=(
+        "Yahoo's Developer API Terms of Use prohibit automated access "
+        "without written permission and prohibit redistributing or "
+        "monetising API data without a licence. Yahoo retired its official "
+        "API in 2017; yfinance calls internal endpoints with no licence at "
+        "all. Personal/local research use is low-risk; a public, "
+        "customer-facing product republishing this data is the higher-risk "
+        "case Yahoo's own terms name explicitly. NOT cleared for public "
+        "serving -- see docs/03-data-sources.md §7."
+    ),
+    licence_url="https://legal.yahoo.com/us/en/yahoo/terms/product-atos/apiforydn/index.html",
+    redistributable=False,
+    verified_on=date(2026, 9, 22),
+)
 
 # The licence position, recorded in the database rather than in a comment.
 # `sources` refuses a row without a non-empty note and a verification date
@@ -122,6 +150,100 @@ def cmd_backfill(args: argparse.Namespace) -> None:
         print(f"  rejections={len(report.rejections)}; first few:")
         for rejection in report.rejections[:5]:
             print(f"    {rejection.instrument_ref}: {rejection.reason}")
+
+
+def cmd_prices(args: argparse.Namespace) -> None:
+    """Backfill daily price bars for the tracked set. Local research use
+    only -- see PRICE_SOURCE_ROW and docs/03-data-sources.md §7."""
+    source = YFinancePriceSource()
+    since = date.fromisoformat(args.since)
+    until = date.fromisoformat(args.until)
+
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO sources (source_id, name, kind, licence_note,
+                                     licence_url, redistributable, verified_on)
+                VALUES (%(source_id)s, %(name)s, %(kind)s, %(licence_note)s,
+                        %(licence_url)s, %(redistributable)s, %(verified_on)s)
+                ON CONFLICT (source_id) DO UPDATE
+                   SET licence_note = excluded.licence_note,
+                       licence_url  = excluded.licence_url,
+                       verified_on  = excluded.verified_on
+                """,
+                PRICE_SOURCE_ROW,
+            )
+        conn.commit()
+
+        total_written = total_unchanged = 0
+        rejections: list = []
+        for company in STAGE_ONE:
+            bars = list(source.fetch_bars(company.us_ticker, since, until))
+            result = price_writer.write_bars(conn, source, company.us_ticker, bars)
+            total_written += result.bars_written
+            total_unchanged += result.bars_unchanged
+            rejections.extend(result.rejections)
+            print(f"  {company.us_ticker:6s} written={result.bars_written:5d} "
+                  f"unchanged={result.bars_unchanged:5d} "
+                  f"rejected={len(result.rejections)}")
+        conn.commit()
+
+    print(f"\ntotal: written={total_written} unchanged={total_unchanged} "
+          f"rejected={len(rejections)}")
+    if rejections:
+        reasons: dict[str, int] = {}
+        for r in rejections:
+            reasons[r.reason] = reasons.get(r.reason, 0) + 1
+        for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+            print(f"  {reason}: {count}")
+
+
+def cmd_factors(args: argparse.Namespace) -> None:
+    """Compute and store the factor score for `--as-of` (default: today).
+    Reads price_bars and metrics_as_of; writes factor_scores. A calculation
+    over the tracked universe, not a recommendation -- see
+    analytics/factor_score.py's module docstring for why it is a rank
+    combination and not a trained model at this sample size."""
+    as_of = date.today() if args.as_of == "today" else date.fromisoformat(args.as_of)
+
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT i.instrument_id, x.value FROM instruments i "
+                "JOIN instrument_external_ids x ON x.instrument_id = i.instrument_id "
+                "AND x.scheme = 'US_TICKER'"
+            )
+            id_to_ticker = dict(cur.fetchall())
+
+        scores = factor_score.compute_scores(conn, list(id_to_ticker), as_of)
+        written = factor_score.store_scores(conn, as_of, scores)
+        conn.commit()
+
+    print(f"as of {as_of}: {written} scores computed and stored "
+          f"(model {factor_score.MODEL_VERSION})\n")
+
+    # A score built from 1 of 3 factors is not comparable to one built from
+    # all 3 -- IBN scores highest here on momentum alone, because its EDGAR
+    # fundamentals 404 (the same expected gap from Phase 7), and momentum
+    # happens to be its only available factor. Ranking it against full-
+    # coverage instruments would present a single-factor artefact as though
+    # it beat a rounded assessment, so full and partial coverage are shown
+    # separately rather than interleaved into one misleadingly total order.
+    full = [s for s in scores if s.factors["factors_available"] == 3]
+    partial = [s for s in scores if s.factors["factors_available"] < 3]
+
+    print("ranked (all 3 factors available):")
+    for s in sorted(full, key=lambda s: -s.composite_score):
+        print(f"  {id_to_ticker[s.instrument_id]:6s} composite={float(s.composite_score):.3f}")
+
+    if partial:
+        print("\nnot ranked -- incomplete factor coverage, not comparable to the above:")
+        for s in sorted(partial, key=lambda s: -s.composite_score):
+            available = s.factors["factors_available"]
+            have = list(s.factors["components"])
+            print(f"  {id_to_ticker[s.instrument_id]:6s} composite={float(s.composite_score):.3f}  "
+                  f"({available}/3: {', '.join(have)})")
 
 
 def cmd_incremental(args: argparse.Namespace) -> None:
@@ -354,6 +476,15 @@ def main(argv: list[str] | None = None) -> None:
     bf.add_argument("--limit", type=int, default=None,
                     help="bound this invocation; resume by running again")
     bf.set_defaults(func=cmd_backfill)
+
+    pr = sub.add_parser("prices", help="local research only -- see docs/03-data-sources.md §7")
+    pr.add_argument("--since", default="2015-01-01")
+    pr.add_argument("--until", default="2030-01-01")
+    pr.set_defaults(func=cmd_prices)
+
+    fac = sub.add_parser("factors", help="compute the factor score, local research only")
+    fac.add_argument("--as-of", default="today", dest="as_of")
+    fac.set_defaults(func=cmd_factors)
 
     inc = sub.add_parser("incremental")
     inc.add_argument("--lookback", type=int, default=2,

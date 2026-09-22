@@ -297,6 +297,25 @@ is justified by observed use rather than by the roadmap having a gap.
 **Deliverable:** Per-feature, decided one at a time.
 **Exit:** Ongoing.
 
+**2026-09-22 — started out of order, recorded rather than hidden.** The rule
+at the top of this document is "no work happens outside a phase," and phases
+run in sequence; Phase 12 has not exited. A factor score (migration 024,
+`analytics/factor_score.py`) was built anyway, on explicit request, against a
+deadline outside this project. It is exactly the "factor exposures" item
+already listed above, just started early rather than invented outside scope.
+
+What shipped and what did not, so the deviation is bounded rather than open:
+daily price bars and a rank-combined factor score across momentum, margin
+and revenue growth, all point-in-time correct, with real tests. **Not
+shipped:** it is not wired into the public web app or API. Building it
+surfaced a live licensing question — Yahoo's terms restrict redistribution
+of `yfinance`-sourced data for a public, customer-facing product, a
+materially different risk than `paper-trader`'s private local use — recorded
+in [docs/03-data-sources.md §7](docs/03-data-sources.md). That restriction, not a
+technical gap, is why this stays CLI-only until a source with terms that
+actually permit public display replaces it, matching the bar SEC_EDGAR
+already met before Phase 3 cleared fundamentals for public use.
+
 ---
 
 ## Dependency notes

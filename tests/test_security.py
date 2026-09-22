@@ -63,7 +63,11 @@ EXPECTED_GRANTS = {
                        "ingestion_runs", "tracked_instruments", "sources",
                        "line_items", "metric_values", "quality_findings",
                        "instrument_external_ids", "ingestion_rejections",
-                       "ingestion_schedule"},
+                       "ingestion_schedule",
+                       # Migration 024. price_bars has no restatement case
+                       # (a printed close is not later revised) so it needs
+                       # no UPDATE path, unlike financial_facts.
+                       "price_bars", "factor_scores"},
             "UPDATE": {"ingestion_runs", "tracked_instruments", "sources",
                        "line_items", "instrument_external_ids",
                        "ingestion_schedule"},

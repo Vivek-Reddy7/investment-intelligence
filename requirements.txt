@@ -1,5 +1,9 @@
 # Runtime
 psycopg[binary]>=3.2
 
+# Price data. Research/local use only -- docs/03-data-sources.md §7 -- not
+# wired into anything the public web app or API serves.
+yfinance>=0.2.40
+
 # Dev
 pytest>=8.0

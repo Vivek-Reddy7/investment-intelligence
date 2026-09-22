@@ -413,3 +413,44 @@ restate a figure on demand.
 
 The concrete adapter is a single file behind a stable interface, which is
 exactly what architecture §2.2 was designed to make true.
+
+---
+
+## 7. Addendum (2026-09-22) — Yahoo Finance, for US-listed price data
+
+**Context.** All nine tracked companies are US-listed (NYSE/NASDAQ ADRs, or a
+direct listing for GLOB), so a natural next step is their price history, and
+it is ordinary US equity market data rather than NSE data — §1's ₹1.1L/yr
+tariff and clause 7.4 do not apply to it.
+
+**But that is not the same as unrestricted.** Checked directly against
+Yahoo's own terms: automated access is prohibited without written permission,
+and redistributing or monetising Yahoo API data without a licence is
+prohibited. Yahoo retired its official API in 2017 and never replaced it;
+`yfinance` — used here and in `paper-trader` — calls Yahoo's internal
+endpoints with no licence at all.
+
+**The risk is not the same in both projects, and that distinction matters.**
+`paper-trader` runs entirely locally and never republishes what it fetches —
+personal research use, which every source on this is consistent in describing
+as low enforcement risk. This project is a public, customer-facing site. That
+is exactly the shape the research flagged as materially higher risk:
+"commercial applications that redistribute scraped data or power
+customer-facing products carry meaningfully higher exposure" than personal
+use.
+
+**Decision, applying §5's own resolution again:** price data sourced this way
+is built and stored for local research and pipeline validation — proving the
+ingestion, feature engineering and scoring pipeline actually works end to
+end — but is **not wired into the public web app or API**. The `sources` row
+for it is seeded with `redistributable = false`, so the restriction is
+encoded in the schema, not left as a comment someone has to remember.
+`price_bars` and `factor_scores` (migration 024) exist under that posture
+until one of two things happens: a price source with terms that actually
+permit public display is substituted — meeting the same bar SEC_EDGAR already
+met — or the restriction is knowingly accepted for a specific, stated reason,
+which has not happened.
+
+**Sources:** [Yahoo Developer API Terms of Use](https://legal.yahoo.com/us/en/yahoo/terms/product-atos/apiforydn/index.html);
+industry summaries of yfinance's unofficial status and commercial-use risk,
+checked against the primary terms above rather than taken on their own.

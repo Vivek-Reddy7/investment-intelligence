@@ -101,7 +101,7 @@ That finding, and what it did to the design, is
 ## How it is built
 
 ```
-db/migrations/     23 forward-only SQL migrations. No down steps: this is an
+db/migrations/     24 forward-only SQL migrations. No down steps: this is an
                    append-only store and a rollback that drops a column drops
                    facts
 src/               Python — ingestion, analytics, accounts, observability
