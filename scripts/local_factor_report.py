@@ -49,6 +49,21 @@ SCORES_QUERY = """
     ORDER BY f.composite_score DESC
 """
 
+SECTORS_QUERY = """
+    SELECT i.value AS ticker, sc.sector, sc.sic_description
+    FROM sector_classifications sc
+    JOIN instrument_external_ids i
+      ON i.instrument_id = sc.instrument_id AND i.scheme = 'US_TICKER'
+"""
+
+MARKET_CAP_QUERY = """
+    SELECT i.value AS ticker, m.market_cap, m.currency
+    FROM market_cap_snapshots m
+    JOIN instrument_external_ids i
+      ON i.instrument_id = m.instrument_id AND i.scheme = 'US_TICKER'
+    WHERE m.as_of = (SELECT max(as_of) FROM market_cap_snapshots)
+"""
+
 TECHNICALS_QUERY = """
     SELECT i.value AS ticker, t.indicators
     FROM technical_indicators t
@@ -100,8 +115,22 @@ def _technicals_block(ind: dict | None) -> str:
     return '<div class="tech">' + ' &middot; '.join(parts) + '</div>'
 
 
+def _meta_line(ticker: str, sector_by_ticker: dict[str, tuple], cap_by_ticker: dict[str, tuple]) -> str:
+    parts = []
+    if ticker in sector_by_ticker:
+        sector, sic_desc = sector_by_ticker[ticker]
+        parts.append(f"{sector} <i>({sic_desc})</i>")
+    if ticker in cap_by_ticker:
+        cap, currency = cap_by_ticker[ticker]
+        parts.append(f"mkt cap {currency} {float(cap):,.0f}")
+    if not parts:
+        return ""
+    return f'<div class="meta">{" &middot; ".join(parts)}</div>'
+
+
 def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[str],
-             technicals_by_ticker: dict[str, dict], show_technicals: bool) -> str:
+             technicals_by_ticker: dict[str, dict], show_technicals: bool,
+             sector_by_ticker: dict[str, tuple], cap_by_ticker: dict[str, tuple]) -> str:
     if not rows:
         return f"<h2>{title}</h2><p class='note'>no scores computed yet</p>"
 
@@ -113,6 +142,7 @@ def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[st
         body = "".join(_factor_row(FACTOR_LABELS[name], c.get(name)) for name in factor_names)
         total = factors.get("factors_total", 3)
         tech = _technicals_block(technicals_by_ticker.get(ticker)) if show_technicals else ""
+        meta = _meta_line(ticker, sector_by_ticker, cap_by_ticker)
         return f"""
         <details class="card">
           <summary>
@@ -120,6 +150,7 @@ def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[st
             <span class="score">{float(composite):.3f}</span>
             <span class="avail">{factors['factors_available']}/{total} factors</span>
           </summary>
+          {meta}
           <table><tbody>{body}</tbody></table>
           {tech}
         </details>"""
@@ -141,20 +172,23 @@ def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[st
 
 
 def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
-           technicals_by_ticker: dict[str, dict]) -> str:
+           technicals_by_ticker: dict[str, dict], sector_by_ticker: dict[str, tuple],
+           cap_by_ticker: dict[str, tuple]) -> str:
     as_of = (combined_rows or fundamental_rows or [(None, None, None, date.today())])[0][3]
 
     fundamental_section = _section(
         "Fundamental-only score", "model factor-v1-rank &middot; momentum, quality, growth",
         fundamental_rows, ["momentum", "quality_net_margin", "growth_revenue"],
-        technicals_by_ticker, show_technicals=False)
+        technicals_by_ticker, show_technicals=False,
+        sector_by_ticker=sector_by_ticker, cap_by_ticker=cap_by_ticker)
     combined_section = _section(
         "Combined score (fundamental + technical)",
         "model combined-v1-rank &middot; adds trend strength and MACD momentum "
         "to the three factors above",
         combined_rows,
         ["momentum", "quality_net_margin", "growth_revenue", "trend_strength", "macd_momentum"],
-        technicals_by_ticker, show_technicals=True)
+        technicals_by_ticker, show_technicals=True,
+        sector_by_ticker=sector_by_ticker, cap_by_ticker=cap_by_ticker)
 
     return f"""<!doctype html>
 <html><head><meta charset="utf-8">
@@ -192,6 +226,8 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
   .tech i {{ color:#666; font-style:italic; }}
   .tech-missing {{ padding:10px 16px; border-top:1px solid #22262c;
                     font-size:12.5px; color:#666; font-style:italic; }}
+  .meta {{ padding:0 16px 10px; font-size:12px; color:#8a8a8a; }}
+  .meta i {{ color:#666; font-style:italic; }}
 </style></head>
 <body>
   <div class="banner">
@@ -221,14 +257,20 @@ def main() -> None:
             combined_rows = cur.fetchall()
             cur.execute(TECHNICALS_QUERY)
             technicals_by_ticker = dict(cur.fetchall())
+            cur.execute(SECTORS_QUERY)
+            sector_by_ticker = {t: (sector, sic) for t, sector, sic in cur.fetchall()}
+            cur.execute(MARKET_CAP_QUERY)
+            cap_by_ticker = {t: (cap, currency) for t, cap, currency in cur.fetchall()}
 
     if not fundamental_rows and not combined_rows:
         raise SystemExit("no factor_scores rows -- run `make factors` and `make combined` first")
 
     OUT_DIR.mkdir(exist_ok=True)
-    OUT_FILE.write_text(render(fundamental_rows, combined_rows, technicals_by_ticker))
+    OUT_FILE.write_text(render(fundamental_rows, combined_rows, technicals_by_ticker,
+                               sector_by_ticker, cap_by_ticker))
     print(f"wrote {OUT_FILE} ({len(fundamental_rows)} fundamental-only, "
-          f"{len(combined_rows)} combined, {len(technicals_by_ticker)} with technicals)")
+          f"{len(combined_rows)} combined, {len(technicals_by_ticker)} with technicals, "
+          f"{len(sector_by_ticker)} with sector, {len(cap_by_ticker)} with market cap)")
 
 
 if __name__ == "__main__":

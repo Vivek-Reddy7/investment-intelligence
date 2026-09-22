@@ -39,6 +39,8 @@ help:
 	@echo "           make factors     — compute today's factor score"
 	@echo "           make technicals  — compute today's technical indicators"
 	@echo "           make combined    — blend fundamentals + technicals into one score"
+	@echo "           make sectors     — fetch SIC/sector classification (not local-only)"
+	@echo "           make marketcap   — compute market cap (no cap-tier label, see migration 028)"
 	@echo "           make size AMOUNT=5000 — split an amount across the top-ranked names"
 	@echo "           make factor-report — regenerate and open the local-only viewer"
 
@@ -123,6 +125,14 @@ technicals:
 
 combined:
 	$(PY) -m investment_intelligence.cli combined --as-of today
+
+# Not local-research-only -- see migration 027 -- but grouped here anyway
+# since every command in this section is part of the same pipeline.
+sectors:
+	$(PY) -m investment_intelligence.cli sectors
+
+marketcap:
+	$(PY) -m investment_intelligence.cli marketcap --as-of today
 
 # AMOUNT and CURRENCY are make variables, not shell args: `make size AMOUNT=500`.
 AMOUNT   ?= 5000

@@ -24,7 +24,10 @@ from investment_intelligence.ingest import rejections as rejection_log
 from investment_intelligence.observability import logging as structured
 from investment_intelligence.observability import status as status_mod
 from investment_intelligence.ingest import price_writer
-from investment_intelligence.analytics import combined_score, factor_score, sizing, technicals
+from investment_intelligence.analytics import (
+    combined_score, factor_score, market_cap, sizing, technicals,
+)
+from investment_intelligence.sources import classification
 from investment_intelligence.sources.edgar import EdgarSource
 from investment_intelligence.sources.prices import YFinancePriceSource
 
@@ -373,6 +376,80 @@ def cmd_size(args: argparse.Namespace) -> None:
           f"(uninvested cash -- whole shares only, no fractional-share brokerage assumed)")
 
 
+def cmd_sectors(args: argparse.Namespace) -> None:
+    """Fetch and store each tracked company's SIC code and sector, from SEC
+    EDGAR filer metadata. NOT local-research-only -- see migration 027 for
+    why this table's licensing posture differs from prices/factors/technicals."""
+    results = classification.fetch_all([c.cik for c in STAGE_ONE])
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for r in results:
+                cur.execute(
+                    "SELECT instrument_id FROM instrument_external_ids "
+                    "WHERE scheme = 'SEC_CIK' AND value = %s", (str(r.cik),))
+                row = cur.fetchone()
+                if row is None:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO sector_classifications
+                        (instrument_id, sic_code, sic_description, sector,
+                         source_id, verified_on)
+                    VALUES (%s, %s, %s, %s, 'SEC_EDGAR', %s)
+                    ON CONFLICT (instrument_id) DO UPDATE
+                       SET sic_code = excluded.sic_code,
+                           sic_description = excluded.sic_description,
+                           sector = excluded.sector,
+                           verified_on = excluded.verified_on,
+                           computed_at = now()
+                    """,
+                    (row[0], r.sic_code, r.sic_description, r.sector, date.today()),
+                )
+        conn.commit()
+
+    print(f"{len(results)} of {len(STAGE_ONE)} tracked companies classified\n")
+    by_sector: dict[str, list[str]] = {}
+    ticker_by_cik = {c.cik: c.us_ticker for c in STAGE_ONE}
+    for r in results:
+        by_sector.setdefault(r.sector, []).append(ticker_by_cik.get(r.cik, str(r.cik)))
+    for sector, tickers in sorted(by_sector.items()):
+        print(f"  {sector:35s} {', '.join(sorted(tickers))}")
+
+
+def cmd_marketcap(args: argparse.Namespace) -> None:
+    """Compute and store market cap (shares outstanding * price) for
+    `--as-of`. LOCAL RESEARCH ONLY -- price is yfinance-sourced. No cap-tier
+    label; see migration 028 for why one is not produced."""
+    as_of = date.today() if args.as_of == "today" else date.fromisoformat(args.as_of)
+
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT i.instrument_id, x.value FROM instruments i "
+                "JOIN instrument_external_ids x ON x.instrument_id = i.instrument_id "
+                "AND x.scheme = 'US_TICKER'"
+            )
+            id_to_ticker = dict(cur.fetchall())
+
+        results = []
+        for company in STAGE_ONE:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT instrument_id FROM instrument_external_ids "
+                    "WHERE scheme = 'SEC_CIK' AND value = %s", (str(company.cik),))
+                row = cur.fetchone()
+            if row is None:
+                continue
+            cap = market_cap.compute_and_store(conn, row[0], company.cik, as_of)
+            if cap is not None:
+                results.append((company.us_ticker, cap))
+        conn.commit()
+
+    print(f"as of {as_of}: {len(results)} of {len(STAGE_ONE)} tracked companies\n")
+    for ticker, cap in sorted(results, key=lambda x: -x[1]):
+        print(f"  {ticker:6s} ${cap:>20,.0f}")
+
+
 def cmd_incremental(args: argparse.Namespace) -> None:
     """The daily job. Cheap, and its real output is the run-log row."""
     limiter = backfill.RateLimiter(0.5)
@@ -626,6 +703,13 @@ def main(argv: list[str] | None = None) -> None:
     sz.add_argument("--currency", default="USD")
     sz.add_argument("--top", type=int, default=5, help="how many top-ranked instruments to include")
     sz.set_defaults(func=cmd_size)
+
+    sub.add_parser("sectors", help="fetch SIC/sector classification (not local-only)").set_defaults(
+        func=cmd_sectors)
+
+    mc = sub.add_parser("marketcap", help="compute market cap, local research only")
+    mc.add_argument("--as-of", default="today", dest="as_of")
+    mc.set_defaults(func=cmd_marketcap)
 
     inc = sub.add_parser("incremental")
     inc.add_argument("--lookback", type=int, default=2,
