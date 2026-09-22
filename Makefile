@@ -35,6 +35,9 @@ help:
 	@echo "           make test-cov    — with a coverage report"
 	@echo "           make web         — the site on http://localhost:3100"
 	@echo "           make audit       — dependency vulnerability scan"
+	@echo "Factors:   make prices      — backfill prices, LOCAL RESEARCH ONLY (§03-data-sources.md §7)"
+	@echo "           make factors     — compute today's factor score"
+	@echo "           make factor-report — regenerate and open the local-only viewer"
 
 # ---------------------------------------------------------------------------
 
@@ -99,6 +102,23 @@ health:
 
 gaps:
 	-@$(PY) -m investment_intelligence.cli gaps
+
+# ---------------------------------------------------------------------------
+
+# LOCAL RESEARCH ONLY. Yahoo's terms restrict redistributing yfinance-sourced
+# data for a public, customer-facing product — see docs/03-data-sources.md
+# §7. Nothing under this heading is wired into `make web` or the deployed
+# app, and factor-report writes to local-only/, which is gitignored.
+prices:
+	$(PY) -m investment_intelligence.cli prices --since 2015-01-01
+
+factors:
+	$(PY) -m investment_intelligence.cli factors --as-of today
+
+factor-report:
+	$(PY) scripts/local_factor_report.py
+	@open local-only/factor_report.html 2>/dev/null || \
+	  echo "open local-only/factor_report.html in a browser"
 
 # ---------------------------------------------------------------------------
 
