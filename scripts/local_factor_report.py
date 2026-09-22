@@ -72,6 +72,14 @@ TECHNICALS_QUERY = """
     WHERE t.as_of = (SELECT max(as_of) FROM technical_indicators)
 """
 
+RISK_QUERY = """
+    SELECT i.value AS ticker, r.metrics
+    FROM risk_metrics r
+    JOIN instrument_external_ids i
+      ON i.instrument_id = r.instrument_id AND i.scheme = 'US_TICKER'
+    WHERE r.as_of = (SELECT max(as_of) FROM risk_metrics)
+"""
+
 
 def _factor_row(label: str, comp: dict | None) -> str:
     if comp is None:
@@ -115,7 +123,8 @@ def _technicals_block(ind: dict | None) -> str:
     return '<div class="tech">' + ' &middot; '.join(parts) + '</div>'
 
 
-def _meta_line(ticker: str, sector_by_ticker: dict[str, tuple], cap_by_ticker: dict[str, tuple]) -> str:
+def _meta_line(ticker: str, sector_by_ticker: dict[str, tuple], cap_by_ticker: dict[str, tuple],
+               risk_by_ticker: dict[str, dict]) -> str:
     parts = []
     if ticker in sector_by_ticker:
         sector, sic_desc = sector_by_ticker[ticker]
@@ -123,6 +132,12 @@ def _meta_line(ticker: str, sector_by_ticker: dict[str, tuple], cap_by_ticker: d
     if ticker in cap_by_ticker:
         cap, currency = cap_by_ticker[ticker]
         parts.append(f"mkt cap {currency} {float(cap):,.0f}")
+    if ticker in risk_by_ticker:
+        m = risk_by_ticker[ticker]
+        if "annualized_volatility" in m:
+            parts.append(f"ann.vol {float(m['annualized_volatility']):.0%}")
+        if "max_drawdown" in m:
+            parts.append(f"max DD {float(m['max_drawdown']):.0%}")
     if not parts:
         return ""
     return f'<div class="meta">{" &middot; ".join(parts)}</div>'
@@ -130,7 +145,8 @@ def _meta_line(ticker: str, sector_by_ticker: dict[str, tuple], cap_by_ticker: d
 
 def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[str],
              technicals_by_ticker: dict[str, dict], show_technicals: bool,
-             sector_by_ticker: dict[str, tuple], cap_by_ticker: dict[str, tuple]) -> str:
+             sector_by_ticker: dict[str, tuple], cap_by_ticker: dict[str, tuple],
+             risk_by_ticker: dict[str, dict]) -> str:
     if not rows:
         return f"<h2>{title}</h2><p class='note'>no scores computed yet</p>"
 
@@ -142,7 +158,7 @@ def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[st
         body = "".join(_factor_row(FACTOR_LABELS[name], c.get(name)) for name in factor_names)
         total = factors.get("factors_total", 3)
         tech = _technicals_block(technicals_by_ticker.get(ticker)) if show_technicals else ""
-        meta = _meta_line(ticker, sector_by_ticker, cap_by_ticker)
+        meta = _meta_line(ticker, sector_by_ticker, cap_by_ticker, risk_by_ticker)
         return f"""
         <details class="card">
           <summary>
@@ -188,14 +204,16 @@ def _backtest_block(summary: dict | None) -> str:
 
 def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
            technicals_by_ticker: dict[str, dict], sector_by_ticker: dict[str, tuple],
-           cap_by_ticker: dict[str, tuple], backtest_summary: dict | None) -> str:
+           cap_by_ticker: dict[str, tuple], backtest_summary: dict | None,
+           risk_by_ticker: dict[str, dict]) -> str:
     as_of = (combined_rows or fundamental_rows or [(None, None, None, date.today())])[0][3]
 
     fundamental_section = _section(
         "Fundamental-only score", "model factor-v1-rank &middot; momentum, quality, growth",
         fundamental_rows, ["momentum", "quality_net_margin", "growth_revenue"],
         technicals_by_ticker, show_technicals=False,
-        sector_by_ticker=sector_by_ticker, cap_by_ticker=cap_by_ticker)
+        sector_by_ticker=sector_by_ticker, cap_by_ticker=cap_by_ticker,
+        risk_by_ticker=risk_by_ticker)
     combined_section = _section(
         "Combined score (fundamental + technical)",
         "model combined-v1-rank &middot; adds trend strength and MACD momentum "
@@ -203,7 +221,8 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
         combined_rows,
         ["momentum", "quality_net_margin", "growth_revenue", "trend_strength", "macd_momentum"],
         technicals_by_ticker, show_technicals=True,
-        sector_by_ticker=sector_by_ticker, cap_by_ticker=cap_by_ticker)
+        sector_by_ticker=sector_by_ticker, cap_by_ticker=cap_by_ticker,
+        risk_by_ticker=risk_by_ticker)
 
     return f"""<!doctype html>
 <html><head><meta charset="utf-8">
@@ -292,6 +311,8 @@ def main() -> None:
             sector_by_ticker = {t: (sector, sic) for t, sector, sic in cur.fetchall()}
             cur.execute(MARKET_CAP_QUERY)
             cap_by_ticker = {t: (cap, currency) for t, cap, currency in cur.fetchall()}
+            cur.execute(RISK_QUERY)
+            risk_by_ticker = dict(cur.fetchall())
             cur.execute(BACKTEST_QUERY, (backtest.MODEL_VERSION,))
             backtest_points = [
                 backtest.BacktestPoint(instrument_id=iid, as_of=as_of, composite_score=score,
@@ -305,10 +326,12 @@ def main() -> None:
 
     OUT_DIR.mkdir(exist_ok=True)
     OUT_FILE.write_text(render(fundamental_rows, combined_rows, technicals_by_ticker,
-                               sector_by_ticker, cap_by_ticker, backtest_summary))
+                               sector_by_ticker, cap_by_ticker, backtest_summary,
+                               risk_by_ticker))
     print(f"wrote {OUT_FILE} ({len(fundamental_rows)} fundamental-only, "
           f"{len(combined_rows)} combined, {len(technicals_by_ticker)} with technicals, "
-          f"{len(sector_by_ticker)} with sector, {len(cap_by_ticker)} with market cap)")
+          f"{len(sector_by_ticker)} with sector, {len(cap_by_ticker)} with market cap, "
+          f"{len(risk_by_ticker)} with risk metrics)")
 
 
 if __name__ == "__main__":

@@ -76,7 +76,9 @@ EXPECTED_GRANTS = {
                        # everything else here; market_cap_snapshots is.
                        "sector_classifications", "market_cap_snapshots",
                        # Migration 029.
-                       "backtest_results"},
+                       "backtest_results",
+                       # Migration 030.
+                       "risk_metrics"},
             "UPDATE": {"ingestion_runs", "tracked_instruments", "sources",
                        "line_items", "instrument_external_ids",
                        "ingestion_schedule",
@@ -87,8 +89,8 @@ EXPECTED_GRANTS = {
                        "factor_scores", "technical_indicators",
                        # Migrations 027/028: also recomputable on rerun.
                        "sector_classifications", "market_cap_snapshots",
-                       # Migration 029: also recomputable on rerun.
-                       "backtest_results"},
+                       # Migrations 029/030: also recomputable on rerun.
+                       "backtest_results", "risk_metrics"},
             "DELETE": {"metric_values", "quality_findings"},
         },
         # Invariant 8: nothing at all on the user domain.

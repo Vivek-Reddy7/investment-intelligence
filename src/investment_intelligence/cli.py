@@ -25,7 +25,7 @@ from investment_intelligence.observability import logging as structured
 from investment_intelligence.observability import status as status_mod
 from investment_intelligence.ingest import price_writer
 from investment_intelligence.analytics import (
-    backtest, combined_score, factor_score, market_cap, sizing, technicals,
+    backtest, combined_score, factor_score, market_cap, risk, sizing, technicals,
 )
 from investment_intelligence.sources import classification
 from investment_intelligence.sources.edgar import EdgarSource
@@ -282,6 +282,41 @@ def cmd_technicals(args: argparse.Namespace) -> None:
         cross_s = "golden" if cross is True else "death" if cross is False else "-"
         bo = ind.get("range_20d", {}).get("breakout", "-")
         print(f"  {ticker:6s} RSI={rsi:>6s}  cross={cross_s:6s}  breakout={bo}")
+
+
+def cmd_risk(args: argparse.Namespace) -> None:
+    """Compute and store risk metrics for `--as-of` (default: today):
+    annualised volatility, max drawdown, historical 95% VaR. Describes the
+    past, not a prediction -- see analytics/risk.py's module docstring.
+    Local research only, same as `prices` and `technicals`."""
+    as_of = date.today() if args.as_of == "today" else date.fromisoformat(args.as_of)
+
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT i.instrument_id, x.value FROM instruments i "
+                "JOIN instrument_external_ids x ON x.instrument_id = i.instrument_id "
+                "AND x.scheme = 'US_TICKER'"
+            )
+            id_to_ticker = dict(cur.fetchall())
+
+        written = risk.compute_and_store(conn, list(id_to_ticker), as_of)
+        conn.commit()
+
+        rows = []
+        for iid in id_to_ticker:
+            m = risk.compute(conn, iid, as_of)
+            if m:
+                rows.append((id_to_ticker[iid], m))
+
+    print(f"as of {as_of}: {written} instruments computed and stored "
+          f"(model {risk.MODEL_VERSION})\n")
+    for ticker, m in sorted(rows, key=lambda r: -float(r[1].get("annualized_volatility", 0))):
+        vol = f"{float(m['annualized_volatility']):.1%}" if "annualized_volatility" in m else "-"
+        dd = f"{float(m['max_drawdown']):.1%}" if "max_drawdown" in m else "-"
+        var = f"{float(m['historical_var_95']):.1%}" if "historical_var_95" in m else "-"
+        print(f"  {ticker:6s} ann.vol={vol:>7s}  max drawdown={dd:>8s}  "
+              f"1-day VaR(95%)={var:>7s}")
 
 
 def cmd_combined(args: argparse.Namespace) -> None:
@@ -739,6 +774,10 @@ def main(argv: list[str] | None = None) -> None:
     tech = sub.add_parser("technicals", help="compute technical indicators, local research only")
     tech.add_argument("--as-of", default="today", dest="as_of")
     tech.set_defaults(func=cmd_technicals)
+
+    rk = sub.add_parser("risk", help="compute risk metrics, local research only")
+    rk.add_argument("--as-of", default="today", dest="as_of")
+    rk.set_defaults(func=cmd_risk)
 
     comb = sub.add_parser("combined", help="compute the combined fundamental+technical score")
     comb.add_argument("--as-of", default="today", dest="as_of")

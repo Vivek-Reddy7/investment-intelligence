@@ -42,6 +42,7 @@ help:
 	@echo "           make sectors     — fetch SIC/sector classification (not local-only)"
 	@echo "           make marketcap   — compute market cap (no cap-tier label, see migration 028)"
 	@echo "           make backtest    — validate the combined score against actual forward returns"
+	@echo "           make risk        — volatility, max drawdown, historical VaR"
 	@echo "           make size AMOUNT=5000 — split an amount across the top-ranked names"
 	@echo "           make factor-report — regenerate and open the local-only viewer"
 
@@ -141,6 +142,9 @@ marketcap:
 # checkpoint, not one now-only pass.
 backtest:
 	$(PY) -m investment_intelligence.cli backtest
+
+risk:
+	$(PY) -m investment_intelligence.cli risk --as-of today
 
 # AMOUNT and CURRENCY are make variables, not shell args: `make size AMOUNT=500`.
 AMOUNT   ?= 5000
