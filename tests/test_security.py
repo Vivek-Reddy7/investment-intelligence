@@ -67,10 +67,17 @@ EXPECTED_GRANTS = {
                        # Migration 024. price_bars has no restatement case
                        # (a printed close is not later revised) so it needs
                        # no UPDATE path, unlike financial_facts.
-                       "price_bars", "factor_scores"},
+                       "price_bars", "factor_scores",
+                       # Migration 025.
+                       "technical_indicators"},
             "UPDATE": {"ingestion_runs", "tracked_instruments", "sources",
                        "line_items", "instrument_external_ids",
-                       "ingestion_schedule"},
+                       "ingestion_schedule",
+                       # Migrations 024/026 and 025: both are derived,
+                       # recomputable analytics (INSERT ... ON CONFLICT DO
+                       # UPDATE), unlike price_bars beside them above, which
+                       # is a store of raw, never-revised prints.
+                       "factor_scores", "technical_indicators"},
             "DELETE": {"metric_values", "quality_findings"},
         },
         # Invariant 8: nothing at all on the user domain.

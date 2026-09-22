@@ -37,6 +37,7 @@ help:
 	@echo "           make audit       — dependency vulnerability scan"
 	@echo "Factors:   make prices      — backfill prices, LOCAL RESEARCH ONLY (§03-data-sources.md §7)"
 	@echo "           make factors     — compute today's factor score"
+	@echo "           make technicals  — compute today's technical indicators"
 	@echo "           make factor-report — regenerate and open the local-only viewer"
 
 # ---------------------------------------------------------------------------
@@ -114,6 +115,9 @@ prices:
 
 factors:
 	$(PY) -m investment_intelligence.cli factors --as-of today
+
+technicals:
+	$(PY) -m investment_intelligence.cli technicals --as-of today
 
 factor-report:
 	$(PY) scripts/local_factor_report.py

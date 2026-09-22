@@ -23,7 +23,7 @@ from investment_intelligence.ingest import rejections as rejection_log
 from investment_intelligence.observability import logging as structured
 from investment_intelligence.observability import status as status_mod
 from investment_intelligence.ingest import price_writer
-from investment_intelligence.analytics import factor_score
+from investment_intelligence.analytics import factor_score, technicals
 from investment_intelligence.sources.edgar import EdgarSource
 from investment_intelligence.sources.prices import YFinancePriceSource
 
@@ -244,6 +244,40 @@ def cmd_factors(args: argparse.Namespace) -> None:
             have = list(s.factors["components"])
             print(f"  {id_to_ticker[s.instrument_id]:6s} composite={float(s.composite_score):.3f}  "
                   f"({available}/3: {', '.join(have)})")
+
+
+def cmd_technicals(args: argparse.Namespace) -> None:
+    """Compute and store technical indicators for `--as-of` (default: today).
+    Calculations, not signals -- see analytics/technicals.py's module
+    docstring. Local research only, same as `prices` and `factors`."""
+    as_of = date.today() if args.as_of == "today" else date.fromisoformat(args.as_of)
+
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT i.instrument_id, x.value FROM instruments i "
+                "JOIN instrument_external_ids x ON x.instrument_id = i.instrument_id "
+                "AND x.scheme = 'US_TICKER'"
+            )
+            id_to_ticker = dict(cur.fetchall())
+
+        written = technicals.compute_and_store(conn, list(id_to_ticker), as_of)
+        conn.commit()
+
+        rows = []
+        for iid in id_to_ticker:
+            ind = technicals.compute(conn, iid, as_of)
+            if ind:
+                rows.append((id_to_ticker[iid], ind))
+
+    print(f"as of {as_of}: {written} instruments computed and stored "
+          f"(model {technicals.MODEL_VERSION})\n")
+    for ticker, ind in sorted(rows):
+        rsi = f"{float(ind['rsi_14']):.1f}" if "rsi_14" in ind else "-"
+        cross = ind.get("golden_cross")
+        cross_s = "golden" if cross is True else "death" if cross is False else "-"
+        bo = ind.get("range_20d", {}).get("breakout", "-")
+        print(f"  {ticker:6s} RSI={rsi:>6s}  cross={cross_s:6s}  breakout={bo}")
 
 
 def cmd_incremental(args: argparse.Namespace) -> None:
@@ -485,6 +519,10 @@ def main(argv: list[str] | None = None) -> None:
     fac = sub.add_parser("factors", help="compute the factor score, local research only")
     fac.add_argument("--as-of", default="today", dest="as_of")
     fac.set_defaults(func=cmd_factors)
+
+    tech = sub.add_parser("technicals", help="compute technical indicators, local research only")
+    tech.add_argument("--as-of", default="today", dest="as_of")
+    tech.set_defaults(func=cmd_technicals)
 
     inc = sub.add_parser("incremental")
     inc.add_argument("--lookback", type=int, default=2,

@@ -37,6 +37,14 @@ QUERY = """
     ORDER BY f.composite_score DESC
 """
 
+TECHNICALS_QUERY = """
+    SELECT i.value AS ticker, t.indicators
+    FROM technical_indicators t
+    JOIN instrument_external_ids i
+      ON i.instrument_id = t.instrument_id AND i.scheme = 'US_TICKER'
+    WHERE t.as_of = (SELECT max(as_of) FROM technical_indicators)
+"""
+
 
 def _factor_row(name: str, label: str, comp: dict | None) -> str:
     if comp is None:
@@ -49,7 +57,29 @@ def _factor_row(name: str, label: str, comp: dict | None) -> str:
             f'<span>{rank:.2f}</span></div></td></tr>')
 
 
-def render(rows: list[tuple]) -> str:
+def _technicals_block(ind: dict | None) -> str:
+    if ind is None:
+        return '<div class="tech-missing">no technical indicators computed</div>'
+    rsi = ind.get("rsi_14")
+    cross = ind.get("golden_cross")
+    cross_s = ("golden cross" if cross is True else
+               "death cross" if cross is False else "-")
+    bo = ind.get("range_20d", {}).get("breakout", "-")
+    pb = ind.get("bollinger", {}).get("percent_b")
+    macd = ind.get("macd")
+    parts = []
+    if rsi is not None:
+        parts.append(f"RSI(14) {float(rsi):.1f}")
+    parts.append(f"{cross_s} (SMA50/SMA200)")
+    if macd:
+        parts.append(f"MACD hist {float(macd['histogram']):+.3f}")
+    if pb is not None:
+        parts.append(f"Bollinger %B {float(pb):.2f}")
+    parts.append(f"20d range: {bo}")
+    return '<div class="tech">' + ' &middot; '.join(parts) + '</div>'
+
+
+def render(rows: list[tuple], technicals_by_ticker: dict[str, dict]) -> str:
     full = [r for r in rows if r[2]["factors_available"] == 3]
     partial = [r for r in rows if r[2]["factors_available"] < 3]
     as_of = rows[0][3] if rows else date.today()
@@ -61,6 +91,7 @@ def render(rows: list[tuple]) -> str:
             _factor_row("quality", "Quality (net margin)", c.get("quality_net_margin")),
             _factor_row("growth", "Growth (revenue YoY)", c.get("growth_revenue")),
         ])
+        tech = _technicals_block(technicals_by_ticker.get(ticker))
         return f"""
         <details class="card">
           <summary>
@@ -69,6 +100,7 @@ def render(rows: list[tuple]) -> str:
             <span class="avail">{factors['factors_available']}/3 factors</span>
           </summary>
           <table><tbody>{body}</tbody></table>
+          {tech}
         </details>"""
 
     full_html = "".join(card(t, s, f) for t, s, f, _ in full)
@@ -109,6 +141,10 @@ def render(rows: list[tuple]) -> str:
   .bar .fill {{ background:#3f7a3f; height:100%; border-radius:3px; }}
   .bar span {{ position:absolute; right:6px; top:0; font-size:11px; color:#ccc; }}
   tr.missing td {{ color:#666; font-style:italic; }}
+  .tech {{ padding:10px 16px; border-top:1px solid #22262c; font-size:12.5px;
+           color:#9db4d1; }}
+  .tech-missing {{ padding:10px 16px; border-top:1px solid #22262c;
+                    font-size:12.5px; color:#666; font-style:italic; }}
 </style></head>
 <body>
   <div class="banner">
@@ -135,13 +171,16 @@ def main() -> None:
         with conn.cursor() as cur:
             cur.execute(QUERY)
             rows = cur.fetchall()
+            cur.execute(TECHNICALS_QUERY)
+            technicals_by_ticker = dict(cur.fetchall())
 
     if not rows:
         raise SystemExit("no factor_scores rows -- run `investment-intelligence factors` first")
 
     OUT_DIR.mkdir(exist_ok=True)
-    OUT_FILE.write_text(render(rows))
-    print(f"wrote {OUT_FILE} ({len(rows)} instruments)")
+    OUT_FILE.write_text(render(rows, technicals_by_ticker))
+    print(f"wrote {OUT_FILE} ({len(rows)} instruments, "
+          f"{len(technicals_by_ticker)} with technicals)")
 
 
 if __name__ == "__main__":
