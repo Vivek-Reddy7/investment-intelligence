@@ -22,6 +22,7 @@ from investment_intelligence.analytics.backtest import (
     _forward_return,
     _ranks,
     information_coefficient,
+    store,
 )
 from investment_intelligence.ingest.price_writer import write_bars
 from investment_intelligence.sources.prices import PriceBar
@@ -193,3 +194,90 @@ def test_forward_return_tolerates_an_ordinary_weekend_gap(conn):
 
     result = _forward_return(conn, instrument_id, date(2020, 1, 1), forward_days=3)
     assert result == D("0.10")   # 100 -> 110
+
+
+def test_forward_return_none_when_as_of_is_before_any_bar(conn, priced_instrument):
+    # No price on or before as_of at all -- start_row is None. Must refuse,
+    # not fall through to treating the end bar as a return from nothing.
+    result = _forward_return(conn, priced_instrument, date(2019, 1, 1), forward_days=30)
+    assert result is None
+
+
+def test_forward_return_none_when_start_close_is_zero(conn):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO sources (source_id, name, kind, licence_note,
+                                 redistributable, verified_on)
+            VALUES ('TEST_PRICES', 'Test price source', 'MARKET_DATA_VENDOR',
+                    'Test fixture. Not a real licence position.', false, %s)
+            ON CONFLICT (source_id) DO NOTHING
+            """,
+            (date.today(),),
+        )
+        cur.execute("INSERT INTO instruments (isin) VALUES ('INE000BTEST3') "
+                     "RETURNING instrument_id")
+        instrument_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO instrument_external_ids (instrument_id, scheme, value, source_id) "
+            "VALUES (%s, 'US_TICKER', 'TEST', 'TEST_PRICES')",
+            (instrument_id,),
+        )
+    bars = [
+        # A zero close is not realistic market data, but the function must
+        # not divide by it -- a delisted/halted instrument is the closest
+        # real-world case this guards.
+        PriceBar(instrument_ref="TEST", day=date(2020, 1, 1), open=D(0), high=D(0),
+                 low=D(0), close=D(0), volume=0),
+        PriceBar(instrument_ref="TEST", day=date(2020, 1, 10), open=D(5), high=D(5),
+                 low=D(5), close=D(5), volume=1000),
+    ]
+    write_bars(conn, _FakeSource(), "TEST", bars)
+
+    result = _forward_return(conn, instrument_id, date(2020, 1, 1), forward_days=9)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# store -- the write path, separate from run()'s scoring pipeline
+# ---------------------------------------------------------------------------
+
+def test_store_writes_and_returns_the_count(conn, priced_instrument):
+    points = [
+        BacktestPoint(instrument_id=priced_instrument, as_of=date(2020, 1, 1),
+                      composite_score=D("0.75"), forward_days=180, forward_return=D("0.20")),
+    ]
+    written = store(conn, points)
+    assert written == 1
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT composite_score, forward_return FROM backtest_results "
+            "WHERE instrument_id = %s AND as_of = %s AND forward_days = 180",
+            (priced_instrument, date(2020, 1, 1)),
+        )
+        row = cur.fetchone()
+    assert row == (D("0.75"), D("0.20"))
+
+
+def test_store_upserts_rather_than_duplicating_on_rerun(conn, priced_instrument):
+    points = [
+        BacktestPoint(instrument_id=priced_instrument, as_of=date(2020, 1, 1),
+                      composite_score=D("0.75"), forward_days=180, forward_return=D("0.20")),
+    ]
+    store(conn, points)
+    revised = [
+        BacktestPoint(instrument_id=priced_instrument, as_of=date(2020, 1, 1),
+                      composite_score=D("0.80"), forward_days=180, forward_return=D("0.25")),
+    ]
+    written = store(conn, revised)
+    assert written == 1
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT composite_score, forward_return FROM backtest_results "
+            "WHERE instrument_id = %s AND as_of = %s AND forward_days = 180",
+            (priced_instrument, date(2020, 1, 1)),
+        )
+        rows = cur.fetchall()
+    assert rows == [(D("0.80"), D("0.25"))]  # one row, updated in place

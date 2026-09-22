@@ -142,3 +142,22 @@ def test_compute_and_store_none_when_no_price_history(conn, monkeypatch):
             value=1000, shares_as_of=date(2025, 12, 31), filed=date(2026, 1, 1)),
     )
     assert compute_and_store(conn, empty_id, cik=999, as_of=date(2026, 1, 2)) is None
+
+
+def test_compute_and_store_none_when_shares_outstanding_is_unavailable(
+    conn, priced_instrument, monkeypatch
+):
+    # EDGAR has no shares-outstanding figure for this filer as of this date
+    # (the real MMYT case, or a filer with no dei/ifrs-full entry yet) --
+    # must stop here rather than fall through to a price lookup for a
+    # market cap it cannot compute.
+    monkeypatch.setattr(
+        "investment_intelligence.analytics.market_cap.fetch_shares_outstanding",
+        lambda cik, as_of: None,
+    )
+    assert compute_and_store(conn, priced_instrument, cik=1067491, as_of=date(2026, 1, 2)) is None
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM market_cap_snapshots WHERE instrument_id = %s",
+                     (priced_instrument,))
+        assert cur.fetchone()[0] == 0

@@ -21,6 +21,7 @@ from investment_intelligence.analytics.risk import (
     _daily_returns,
     annualized_volatility,
     compute,
+    compute_and_store,
     historical_var_95,
     max_drawdown,
 )
@@ -189,3 +190,70 @@ def test_compute_ignores_bars_after_as_of(conn, priced_instrument):
         )
     after = compute(conn, priced_instrument, as_of)
     assert after == before
+
+
+def test_compute_none_with_a_single_bar(conn, priced_instrument):
+    """Rows exist -- sessions_available would be 1 -- but a single close
+    cannot feed any of the three metrics (all need at least 2 returns).
+    `compute` must report None here, not a dict with nothing but the
+    bookkeeping fields."""
+    write_bars(conn, _FakeSource(), "TEST", [
+        PriceBar(instrument_ref="TEST", day=date(2024, 1, 1), open=D(100), high=D(101),
+                  low=D(99), close=D(100), volume=1000),
+    ])
+    assert compute(conn, priced_instrument, date(2024, 1, 1)) is None
+
+
+# ---------------------------------------------------------------------------
+# compute_and_store
+# ---------------------------------------------------------------------------
+
+def test_compute_and_store_writes_one_row_per_instrument_with_data(conn, priced_instrument):
+    closes = _closes_from_returns(D(100), [D("0.01"), D("-0.02")] * 15)
+    bars, day = [], date(2024, 1, 1)
+    for close in closes:
+        bars.append(PriceBar(instrument_ref="TEST", day=day, open=close, high=close + 1,
+                              low=close - 1, close=close, volume=1000))
+        day = date.fromordinal(day.toordinal() + 1)
+    write_bars(conn, _FakeSource(), "TEST", bars)
+    as_of = date.fromordinal(date(2024, 1, 1).toordinal() + len(closes) - 1)
+
+    written = compute_and_store(conn, [priced_instrument], as_of)
+    assert written == 1
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT model_version, metrics FROM risk_metrics "
+            "WHERE instrument_id = %s AND as_of = %s", (priced_instrument, as_of))
+        row = cur.fetchone()
+    assert row[0] == "risk-v1"
+    assert "annualized_volatility" in row[1]
+
+
+def test_compute_and_store_skips_instruments_with_no_metrics(conn):
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO instruments (isin) VALUES ('INE000RISK03') "
+                     "RETURNING instrument_id")
+        empty_id = cur.fetchone()[0]
+    assert compute_and_store(conn, [empty_id], date(2026, 1, 1)) == 0
+
+
+def test_compute_and_store_upserts_on_rerun(conn, priced_instrument):
+    closes = _closes_from_returns(D(100), [D("0.01"), D("-0.02")] * 15)
+    bars, day = [], date(2024, 1, 1)
+    for close in closes:
+        bars.append(PriceBar(instrument_ref="TEST", day=day, open=close, high=close + 1,
+                              low=close - 1, close=close, volume=1000))
+        day = date.fromordinal(day.toordinal() + 1)
+    write_bars(conn, _FakeSource(), "TEST", bars)
+    as_of = date.fromordinal(date(2024, 1, 1).toordinal() + len(closes) - 1)
+
+    compute_and_store(conn, [priced_instrument], as_of)
+    written = compute_and_store(conn, [priced_instrument], as_of)
+    assert written == 1  # re-run updates the same row, not a duplicate
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM risk_metrics WHERE instrument_id = %s AND as_of = %s",
+            (priced_instrument, as_of))
+        assert cur.fetchone()[0] == 1
