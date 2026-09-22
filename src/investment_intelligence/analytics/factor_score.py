@@ -189,7 +189,14 @@ def compute_scores(
     return scores
 
 
-def store_scores(conn: psycopg.Connection, as_of: date, scores: list[FactorScore]) -> int:
+def store_scores(conn: psycopg.Connection, as_of: date, scores: list[FactorScore],
+                 model_version: str = MODEL_VERSION) -> int:
+    """`model_version` defaults to THIS module's own, but must be passed
+    explicitly by any other caller -- combined_score.py reuses this same
+    writer for its five-factor scores, and the default silently writing
+    everything under "factor-v1-rank" was a real bug: it overwrote the
+    fundamental-only scores with the combined ones under the wrong label,
+    found by a sizing query that came back empty and traced back to why."""
     import json
     written = 0
     with conn.cursor() as cur:
@@ -204,7 +211,7 @@ def store_scores(conn: psycopg.Connection, as_of: date, scores: list[FactorScore
                        factors = excluded.factors,
                        computed_at = now()
                 """,
-                (s.instrument_id, as_of, MODEL_VERSION, s.composite_score,
+                (s.instrument_id, as_of, model_version, s.composite_score,
                  json.dumps(s.factors)),
             )
             written += 1

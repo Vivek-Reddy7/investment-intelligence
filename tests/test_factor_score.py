@@ -15,11 +15,14 @@ import pytest
 
 from conftest import add_fact, add_lifecycle, utc
 from investment_intelligence.analytics.factor_score import (
+    MODEL_VERSION,
     MOMENTUM_TRADING_DAYS,
+    FactorScore,
     _latest_metrics,
     _momentum,
     _percentile_ranks,
     compute_scores,
+    store_scores,
 )
 from investment_intelligence.ingest.price_writer import write_bars
 from investment_intelligence.sources.prices import PriceBar
@@ -200,3 +203,27 @@ def test_compute_scores_marks_partial_coverage_honestly(conn, priced_instrument)
     assert len(scores) == 1
     assert scores[0].factors["factors_available"] == 1
     assert set(scores[0].factors["components"]) == {"momentum"}
+
+
+# ---------------------------------------------------------------------------
+# store_scores -- model_version must be respected, not defaulted silently
+# ---------------------------------------------------------------------------
+
+def test_store_scores_uses_the_passed_model_version_not_the_module_default(conn, priced_instrument):
+    """A real bug, found live: store_scores hardcoded this module's own
+    MODEL_VERSION regardless of which model actually produced the scores.
+    combined_score.py reuses this writer for its five-factor scores, and
+    without this parameter every combined run silently overwrote the
+    fundamental-only rows under the wrong label -- discovered only because a
+    downstream sizing query came back empty and the cause had to be traced
+    back through here."""
+    scores = [FactorScore(instrument_id=priced_instrument, composite_score=Decimal("0.5"),
+                          factors={"components": {}, "factors_available": 0})]
+    store_scores(conn, date(2026, 1, 1), scores, model_version="some-other-model")
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT model_version FROM factor_scores WHERE instrument_id = %s",
+                     (priced_instrument,))
+        rows = cur.fetchall()
+    assert rows == [("some-other-model",)]
+    assert MODEL_VERSION not in [r[0] for r in rows]

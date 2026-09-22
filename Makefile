@@ -38,6 +38,8 @@ help:
 	@echo "Factors:   make prices      — backfill prices, LOCAL RESEARCH ONLY (§03-data-sources.md §7)"
 	@echo "           make factors     — compute today's factor score"
 	@echo "           make technicals  — compute today's technical indicators"
+	@echo "           make combined    — blend fundamentals + technicals into one score"
+	@echo "           make size AMOUNT=5000 — split an amount across the top-ranked names"
 	@echo "           make factor-report — regenerate and open the local-only viewer"
 
 # ---------------------------------------------------------------------------
@@ -118,6 +120,15 @@ factors:
 
 technicals:
 	$(PY) -m investment_intelligence.cli technicals --as-of today
+
+combined:
+	$(PY) -m investment_intelligence.cli combined --as-of today
+
+# AMOUNT and CURRENCY are make variables, not shell args: `make size AMOUNT=500`.
+AMOUNT   ?= 5000
+CURRENCY ?= USD
+size:
+	$(PY) -m investment_intelligence.cli size --amount $(AMOUNT) --currency $(CURRENCY) --top 5
 
 factor-report:
 	$(PY) scripts/local_factor_report.py

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
+from decimal import Decimal
 
 from investment_intelligence.companies import STAGE_ONE
 from investment_intelligence.db import connect, migrate
@@ -23,7 +24,7 @@ from investment_intelligence.ingest import rejections as rejection_log
 from investment_intelligence.observability import logging as structured
 from investment_intelligence.observability import status as status_mod
 from investment_intelligence.ingest import price_writer
-from investment_intelligence.analytics import factor_score, technicals
+from investment_intelligence.analytics import combined_score, factor_score, sizing, technicals
 from investment_intelligence.sources.edgar import EdgarSource
 from investment_intelligence.sources.prices import YFinancePriceSource
 
@@ -280,6 +281,98 @@ def cmd_technicals(args: argparse.Namespace) -> None:
         print(f"  {ticker:6s} RSI={rsi:>6s}  cross={cross_s:6s}  breakout={bo}")
 
 
+def cmd_combined(args: argparse.Namespace) -> None:
+    """Compute and store the combined fundamental + technical score for
+    `--as-of` (default: today). See analytics/combined_score.py -- five
+    named factors, equal-weighted rank, not a trained model, not advice."""
+    as_of = date.today() if args.as_of == "today" else date.fromisoformat(args.as_of)
+
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT i.instrument_id, x.value FROM instruments i "
+                "JOIN instrument_external_ids x ON x.instrument_id = i.instrument_id "
+                "AND x.scheme = 'US_TICKER'"
+            )
+            id_to_ticker = dict(cur.fetchall())
+
+        scores = combined_score.compute_scores(conn, list(id_to_ticker), as_of)
+        written = factor_score.store_scores(conn, as_of, scores,
+                                             model_version=combined_score.MODEL_VERSION)
+        conn.commit()
+
+    print(f"as of {as_of}: {written} scores computed and stored "
+          f"(model {combined_score.MODEL_VERSION})\n")
+
+    full = [s for s in scores if s.factors["factors_available"] == s.factors["factors_total"]]
+    partial = [s for s in scores if s.factors["factors_available"] < s.factors["factors_total"]]
+
+    print(f"ranked (all {5} factors available):")
+    for s in sorted(full, key=lambda s: -s.composite_score):
+        print(f"  {id_to_ticker[s.instrument_id]:6s} composite={float(s.composite_score):.3f}")
+
+    if partial:
+        print("\nnot ranked -- incomplete factor coverage, not comparable to the above:")
+        for s in sorted(partial, key=lambda s: -s.composite_score):
+            available, total = s.factors["factors_available"], s.factors["factors_total"]
+            have = list(s.factors["components"])
+            print(f"  {id_to_ticker[s.instrument_id]:6s} composite={float(s.composite_score):.3f}  "
+                  f"({available}/{total}: {', '.join(have)})")
+
+
+def cmd_size(args: argparse.Namespace) -> None:
+    """Split --amount across the top --top ranked (combined score)
+    instruments, equal-weighted. Arithmetic downstream of a screen already
+    run -- see analytics/sizing.py's module docstring for why this makes no
+    selection decision of its own."""
+    amount = Decimal(args.amount)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT f.instrument_id, i.value, p.close
+                FROM factor_scores f
+                JOIN instrument_external_ids i
+                  ON i.instrument_id = f.instrument_id AND i.scheme = 'US_TICKER'
+                JOIN LATERAL (
+                    SELECT close FROM price_bars pb
+                    WHERE pb.instrument_id = f.instrument_id
+                    ORDER BY day DESC LIMIT 1
+                ) p ON true
+                WHERE f.model_version = %s
+                  AND f.as_of = (SELECT max(as_of) FROM factor_scores WHERE model_version = %s)
+                  AND (f.factors->>'factors_available')::int = (f.factors->>'factors_total')::int
+                ORDER BY f.composite_score DESC
+                LIMIT %s
+                """,
+                (combined_score.MODEL_VERSION, combined_score.MODEL_VERSION, args.top),
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        print("no ranked, fully-covered instruments found -- run `combined` first")
+        return
+
+    holdings = [sizing.Holding(instrument_id=iid, ticker=ticker, price=price, currency=args.currency)
+                for iid, ticker, price in rows]
+    try:
+        result = sizing.size_equal_weight(amount, args.currency, holdings)
+    except sizing.MixedCurrency as exc:
+        print(f"cannot size: {exc}")
+        print("(the tracked universe is priced in USD; pass --currency USD, "
+              "or size a group you have already confirmed share one currency)")
+        return
+
+    print(f"₹/${amount} {args.currency}, split equal-weight across the top {len(holdings)} "
+          f"ranked instruments ({result.per_instrument_budget:.2f} {args.currency} each):\n")
+    for a in result.allocations:
+        print(f"  {a.ticker:6s} {a.shares:>4d} shares @ {a.price:>10.2f} = "
+              f"{a.cost:>10.2f} {args.currency}")
+    print(f"\n  spent:    {result.total_spent:.2f} {args.currency}")
+    print(f"  leftover: {result.leftover:.2f} {args.currency}  "
+          f"(uninvested cash -- whole shares only, no fractional-share brokerage assumed)")
+
+
 def cmd_incremental(args: argparse.Namespace) -> None:
     """The daily job. Cheap, and its real output is the run-log row."""
     limiter = backfill.RateLimiter(0.5)
@@ -523,6 +616,16 @@ def main(argv: list[str] | None = None) -> None:
     tech = sub.add_parser("technicals", help="compute technical indicators, local research only")
     tech.add_argument("--as-of", default="today", dest="as_of")
     tech.set_defaults(func=cmd_technicals)
+
+    comb = sub.add_parser("combined", help="compute the combined fundamental+technical score")
+    comb.add_argument("--as-of", default="today", dest="as_of")
+    comb.set_defaults(func=cmd_combined)
+
+    sz = sub.add_parser("size", help="split an amount across the top-ranked instruments")
+    sz.add_argument("--amount", required=True, help="e.g. 5000")
+    sz.add_argument("--currency", default="USD")
+    sz.add_argument("--top", type=int, default=5, help="how many top-ranked instruments to include")
+    sz.set_defaults(func=cmd_size)
 
     inc = sub.add_parser("incremental")
     inc.add_argument("--lookback", type=int, default=2,

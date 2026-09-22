@@ -45,8 +45,9 @@ LOOKBACK_SESSIONS = 250
 getcontext().prec = 28  # default is already this; explicit for sqrt() below
 
 
-def _series_asof(conn: psycopg.Connection, instrument_id: int, as_of: date,
-                  n: int = LOOKBACK_SESSIONS) -> list[tuple[date, Decimal, Decimal, Decimal, int]]:
+def price_series_asof(
+    conn: psycopg.Connection, instrument_id: int, as_of: date, n: int = LOOKBACK_SESSIONS
+) -> list[tuple[date, Decimal, Decimal, Decimal, int]]:
     """Trailing bars up to and including as_of, OLDEST FIRST (day, high, low,
     close, volume) -- the order every recursive calc below needs."""
     with conn.cursor() as cur:
@@ -171,7 +172,7 @@ def compute(conn: psycopg.Connection, instrument_id: int, as_of: date) -> dict |
     """Every indicator this module knows, for one instrument as of one date.
     Returns None entirely if there is no price history at all -- matching
     factor_score.compute_scores's "drop, don't fabricate a zero" rule."""
-    rows = _series_asof(conn, instrument_id, as_of)
+    rows = price_series_asof(conn, instrument_id, as_of)
     if not rows:
         return None
 

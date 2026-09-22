@@ -9,6 +9,13 @@ redistributable=false specifically to avoid. Generating a plain file outside
 web/ makes that mistake structurally impossible rather than merely unlikely:
 there is no deploy step that touches this directory at all.
 
+Shows two scores side by side, not one: the fundamental-only score
+(factor_score.py, 3 factors) and the combined score (combined_score.py, 5
+factors, two of them technical). The point of building the combination was
+that it visibly changes the ranking -- MMYT drops from #2 to #5 once weak
+technicals are blended in -- and showing only the combined score would hide
+that the blend did anything at all.
+
 Usage:
     PYTHONPATH=src python scripts/local_factor_report.py
     open local-only/factor_report.html
@@ -16,24 +23,29 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import date
 from pathlib import Path
 
 import psycopg
 
+from investment_intelligence.analytics import combined_score, factor_score
+
 OUT_DIR = Path(__file__).parent.parent / "local-only"
 OUT_FILE = OUT_DIR / "factor_report.html"
 
 DSN = os.environ.get("DATABASE_URL", "postgresql:///ii_dev")
 
-QUERY = """
+# Parameterized by model_version -- the report shows two models, and a query
+# that ignored model_version would silently mix rows from both together,
+# which is exactly the bug the writer side of this had until today.
+SCORES_QUERY = """
     SELECT i.value AS ticker, f.composite_score, f.factors, f.as_of
     FROM factor_scores f
     JOIN instrument_external_ids i
       ON i.instrument_id = f.instrument_id AND i.scheme = 'US_TICKER'
-    WHERE f.as_of = (SELECT max(as_of) FROM factor_scores)
+    WHERE f.model_version = %s
+      AND f.as_of = (SELECT max(as_of) FROM factor_scores WHERE model_version = %s)
     ORDER BY f.composite_score DESC
 """
 
@@ -46,7 +58,7 @@ TECHNICALS_QUERY = """
 """
 
 
-def _factor_row(name: str, label: str, comp: dict | None) -> str:
+def _factor_row(label: str, comp: dict | None) -> str:
     if comp is None:
         return f'<tr class="missing"><td>{label}</td><td colspan="2">not available</td></tr>'
     value = float(comp["value"])
@@ -55,6 +67,15 @@ def _factor_row(name: str, label: str, comp: dict | None) -> str:
             f'<td class="num">{value:+.4f}</td>'
             f'<td><div class="bar"><div class="fill" style="width:{rank*100:.1f}%"></div>'
             f'<span>{rank:.2f}</span></div></td></tr>')
+
+
+FACTOR_LABELS = {
+    "momentum": "Momentum (6mo price return)",
+    "quality_net_margin": "Quality (net margin)",
+    "growth_revenue": "Growth (revenue YoY)",
+    "trend_strength": "Trend (price vs SMA-200)",
+    "macd_momentum": "MACD momentum (histogram)",
+}
 
 
 def _technicals_block(ind: dict | None) -> str:
@@ -69,7 +90,7 @@ def _technicals_block(ind: dict | None) -> str:
     macd = ind.get("macd")
     parts = []
     if rsi is not None:
-        parts.append(f"RSI(14) {float(rsi):.1f}")
+        parts.append(f"RSI(14) {float(rsi):.1f} <i>(shown, not blended -- see combined_score.py)</i>")
     parts.append(f"{cross_s} (SMA50/SMA200)")
     if macd:
         parts.append(f"MACD hist {float(macd['histogram']):+.3f}")
@@ -79,25 +100,25 @@ def _technicals_block(ind: dict | None) -> str:
     return '<div class="tech">' + ' &middot; '.join(parts) + '</div>'
 
 
-def render(rows: list[tuple], technicals_by_ticker: dict[str, dict]) -> str:
-    full = [r for r in rows if r[2]["factors_available"] == 3]
-    partial = [r for r in rows if r[2]["factors_available"] < 3]
-    as_of = rows[0][3] if rows else date.today()
+def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[str],
+             technicals_by_ticker: dict[str, dict], show_technicals: bool) -> str:
+    if not rows:
+        return f"<h2>{title}</h2><p class='note'>no scores computed yet</p>"
+
+    full = [r for r in rows if r[2]["factors_available"] == r[2].get("factors_total", 3)]
+    partial = [r for r in rows if r[2]["factors_available"] < r[2].get("factors_total", 3)]
 
     def card(ticker, composite, factors) -> str:
         c = factors["components"]
-        body = "".join([
-            _factor_row("momentum", "Momentum (6mo price return)", c.get("momentum")),
-            _factor_row("quality", "Quality (net margin)", c.get("quality_net_margin")),
-            _factor_row("growth", "Growth (revenue YoY)", c.get("growth_revenue")),
-        ])
-        tech = _technicals_block(technicals_by_ticker.get(ticker))
+        body = "".join(_factor_row(FACTOR_LABELS[name], c.get(name)) for name in factor_names)
+        total = factors.get("factors_total", 3)
+        tech = _technicals_block(technicals_by_ticker.get(ticker)) if show_technicals else ""
         return f"""
         <details class="card">
           <summary>
             <span class="ticker">{ticker}</span>
             <span class="score">{float(composite):.3f}</span>
-            <span class="avail">{factors['factors_available']}/3 factors</span>
+            <span class="avail">{factors['factors_available']}/{total} factors</span>
           </summary>
           <table><tbody>{body}</tbody></table>
           {tech}
@@ -105,26 +126,51 @@ def render(rows: list[tuple], technicals_by_ticker: dict[str, dict]) -> str:
 
     full_html = "".join(card(t, s, f) for t, s, f, _ in full)
     partial_html = "".join(card(t, s, f) for t, s, f, _ in partial)
+    total = rows[0][2].get("factors_total", 3)
     partial_section = f"""
-      <h2>Not ranked -- incomplete factor coverage</h2>
-      <p class="note">Fewer than 3 factors available. Not comparable to the
-         ranked list above; shown separately rather than interleaved into
-         one misleadingly total order.</p>
+      <p class="note">Not ranked below -- incomplete factor coverage, not
+         comparable to the ranked list above.</p>
       {partial_html}""" if partial else ""
+
+    return f"""
+      <h2>{title}</h2>
+      <div class="sub2">{subtitle}</div>
+      <p class="note">Ranked: {len(full)} of {len(rows)} tracked instruments, all {total} factors available.</p>
+      {full_html}
+      {partial_section}"""
+
+
+def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
+           technicals_by_ticker: dict[str, dict]) -> str:
+    as_of = (combined_rows or fundamental_rows or [(None, None, None, date.today())])[0][3]
+
+    fundamental_section = _section(
+        "Fundamental-only score", "model factor-v1-rank &middot; momentum, quality, growth",
+        fundamental_rows, ["momentum", "quality_net_margin", "growth_revenue"],
+        technicals_by_ticker, show_technicals=False)
+    combined_section = _section(
+        "Combined score (fundamental + technical)",
+        "model combined-v1-rank &middot; adds trend strength and MACD momentum "
+        "to the three factors above",
+        combined_rows,
+        ["momentum", "quality_net_margin", "growth_revenue", "trend_strength", "macd_momentum"],
+        technicals_by_ticker, show_technicals=True)
 
     return f"""<!doctype html>
 <html><head><meta charset="utf-8">
-<title>Factor scores -- local research only</title>
+<title>Investment scores -- local research only</title>
 <style>
   body {{ background:#0d0f12; color:#e6e6e6; font:14px -apple-system,sans-serif;
-          max-width:760px; margin:40px auto; padding:0 20px; }}
+          max-width:780px; margin:40px auto; padding:0 20px; }}
   .banner {{ background:#3a2a08; border:1px solid #a66a00; color:#ffcc66;
              padding:14px 18px; border-radius:6px; margin-bottom:28px;
              font-size:13px; line-height:1.5; }}
   .banner b {{ color:#ffdd88; }}
   h1 {{ font-size:20px; margin-bottom:4px; }}
-  .sub {{ color:#888; font-size:13px; margin-bottom:24px; }}
-  h2 {{ font-size:15px; margin-top:36px; color:#ccc; }}
+  .as-of {{ color:#888; font-size:13px; margin-bottom:8px; }}
+  h2 {{ font-size:16px; margin-top:40px; color:#eee; border-top:1px solid #2a2e34;
+        padding-top:24px; }}
+  .sub2 {{ color:#888; font-size:12.5px; margin-bottom:10px; }}
   .note {{ color:#999; font-size:12.5px; }}
   .card {{ background:#16191d; border:1px solid #2a2e34; border-radius:6px;
            margin-bottom:8px; padding:0; }}
@@ -143,6 +189,7 @@ def render(rows: list[tuple], technicals_by_ticker: dict[str, dict]) -> str:
   tr.missing td {{ color:#666; font-style:italic; }}
   .tech {{ padding:10px 16px; border-top:1px solid #22262c; font-size:12.5px;
            color:#9db4d1; }}
+  .tech i {{ color:#666; font-style:italic; }}
   .tech-missing {{ padding:10px 16px; border-top:1px solid #22262c;
                     font-size:12.5px; color:#666; font-style:italic; }}
 </style></head>
@@ -154,33 +201,34 @@ def render(rows: list[tuple], technicals_by_ticker: dict[str, dict]) -> str:
     for a public, customer-facing product -- see
     <code>docs/03-data-sources.md §7</code>. This page is generated to a file
     outside <code>web/</code>, which the deployed app never reads, so it
-    cannot end up served publicly by mistake.
+    cannot end up served publicly by mistake. Every score below is a
+    calculation, not a recommendation -- see
+    <code>docs/01-vision-and-scope.md</code>'s own test for what that means.
   </div>
-  <h1>Factor scores</h1>
-  <div class="sub">as of {as_of} &middot; model factor-v1-rank &middot;
-    equal-weighted percentile rank, not a trained model -- see
-    analytics/factor_score.py for why</div>
-  <h2>Ranked ({len(full)} of {len(rows)} tracked instruments, all 3 factors available)</h2>
-  {full_html}
-  {partial_section}
+  <h1>Investment scores</h1>
+  <div class="as-of">as of {as_of}</div>
+  {fundamental_section}
+  {combined_section}
 </body></html>"""
 
 
 def main() -> None:
     with psycopg.connect(DSN) as conn:
         with conn.cursor() as cur:
-            cur.execute(QUERY)
-            rows = cur.fetchall()
+            cur.execute(SCORES_QUERY, (factor_score.MODEL_VERSION, factor_score.MODEL_VERSION))
+            fundamental_rows = cur.fetchall()
+            cur.execute(SCORES_QUERY, (combined_score.MODEL_VERSION, combined_score.MODEL_VERSION))
+            combined_rows = cur.fetchall()
             cur.execute(TECHNICALS_QUERY)
             technicals_by_ticker = dict(cur.fetchall())
 
-    if not rows:
-        raise SystemExit("no factor_scores rows -- run `investment-intelligence factors` first")
+    if not fundamental_rows and not combined_rows:
+        raise SystemExit("no factor_scores rows -- run `make factors` and `make combined` first")
 
     OUT_DIR.mkdir(exist_ok=True)
-    OUT_FILE.write_text(render(rows, technicals_by_ticker))
-    print(f"wrote {OUT_FILE} ({len(rows)} instruments, "
-          f"{len(technicals_by_ticker)} with technicals)")
+    OUT_FILE.write_text(render(fundamental_rows, combined_rows, technicals_by_ticker))
+    print(f"wrote {OUT_FILE} ({len(fundamental_rows)} fundamental-only, "
+          f"{len(combined_rows)} combined, {len(technicals_by_ticker)} with technicals)")
 
 
 if __name__ == "__main__":
