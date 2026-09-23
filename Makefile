@@ -46,6 +46,7 @@ help:
 	@echo "           make size AMOUNT=5000 — split an amount across the top-ranked names"
 	@echo "           make factor-report — regenerate and open the local-only viewer"
 	@echo "           make analytics-status — did the local pipeline actually run, and when"
+	@echo "           make basket-backtest — run paper-trader's strategy backtest over the top-ranked basket"
 
 # ---------------------------------------------------------------------------
 
@@ -160,6 +161,13 @@ factor-report:
 
 analytics-status:
 	$(PY) -m investment_intelligence.cli analytics-status
+
+# Needs a sibling ../paper-trader checkout with its own venv already set up
+# (its own README: python3 -m venv .venv && pip install -r requirements.txt).
+# Override the path with PAPER_TRADER_DIR. See the script's module docstring
+# for why this is a subprocess bridge, not a library import.
+basket-backtest:
+	$(PY) scripts/local_basket_backtest.py
 
 # ---------------------------------------------------------------------------
 

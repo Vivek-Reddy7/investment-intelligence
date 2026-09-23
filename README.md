@@ -174,7 +174,12 @@ yet — so magic-link sign-in and alerts are built but cannot deliver.
 standalone project: a market data pipeline and backtesting engine. The two
 share ideas — idempotent ingestion, validation at the boundary, reconciling
 derived state against a log — and are deliberately separate codebases with
-separate lifecycles. Neither imports the other.
+separate lifecycles. Neither imports the other, including
+`scripts/local_basket_backtest.py`, which runs paper-trader's strategy
+backtest over this project's top-ranked basket by calling its CLI as a
+subprocess and parsing its printed report — the same interface anyone
+running paper-trader by hand already reads, not a shared library or a
+shared store. See that script's module docstring for why.
 
 ## Licence
 
