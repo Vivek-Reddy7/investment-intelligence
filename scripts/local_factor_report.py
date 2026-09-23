@@ -81,6 +81,20 @@ RISK_QUERY = """
     WHERE r.as_of = (SELECT max(as_of) FROM risk_metrics)
 """
 
+# Chart window: ~180 calendar days, oldest first (the order a chart draws
+# left to right). Deliberately NOT the same as technicals.py's 250-session
+# LOOKBACK_SESSIONS -- that window is chosen to seed an EMA/SMA-200's
+# transient for a POINT-IN-TIME number; this one is chosen to be legible at
+# ~560px wide for a chart nobody is computing a stored metric from.
+PRICE_SERIES_QUERY = """
+    SELECT i.value AS ticker, pb.day, pb.close
+    FROM price_bars pb
+    JOIN instrument_external_ids i
+      ON i.instrument_id = pb.instrument_id AND i.scheme = 'US_TICKER'
+    WHERE pb.day >= (SELECT max(day) FROM price_bars) - 180
+    ORDER BY i.value, pb.day
+"""
+
 
 def _factor_row(label: str, comp: dict | None) -> str:
     if comp is None:
@@ -124,6 +138,61 @@ def _technicals_block(ind: dict | None) -> str:
     return '<div class="tech">' + ' &middot; '.join(parts) + '</div>'
 
 
+def _rolling_sma(closes: list[float], n: int) -> list[float | None]:
+    """A trailing SMA at every point, for drawing a line -- NOT the same
+    thing as technicals.sma(), which returns one value as of one date.
+    Display-only: no point-in-time claim is being made here, so this
+    deliberately does not reuse or import from analytics/technicals.py."""
+    out: list[float | None] = []
+    for i in range(len(closes)):
+        if i + 1 < n:
+            out.append(None)
+        else:
+            out.append(sum(closes[i + 1 - n:i + 1]) / n)
+    return out
+
+
+def _price_chart_svg(closes: list[float]) -> str:
+    """An inline SVG line chart: close price plus a 50-session rolling
+    average. No charting library -- the whole page is one dependency-free
+    file, and a polyline is a handful of coordinates."""
+    if len(closes) < 2:
+        return '<div class="chart-missing">not enough price history for a chart</div>'
+
+    sma50 = _rolling_sma(closes, 50)
+    width, height, pad = 560, 90, 6
+    plottable = closes + [v for v in sma50 if v is not None]
+    lo, hi = min(plottable), max(plottable)
+    span = hi - lo or 1.0
+
+    def xy(i: int, v: float) -> tuple[float, float]:
+        x = pad + (width - 2 * pad) * i / (len(closes) - 1)
+        y = pad + (height - 2 * pad) * (1 - (v - lo) / span)
+        return x, y
+
+    close_pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in
+                         (xy(i, v) for i, v in enumerate(closes)))
+
+    # SMA50 is None for the first 49 points -- draw it as one contiguous
+    # segment starting wherever it first becomes defined, not several
+    # broken segments (a rolling average never has an internal gap once it
+    # starts).
+    sma_pts = [xy(i, v) for i, v in enumerate(sma50) if v is not None]
+    sma_path = ""
+    if sma_pts:
+        sma_line = " ".join(f"{x:.1f},{y:.1f}" for x, y in sma_pts)
+        sma_path = (f'<polyline points="{sma_line}" fill="none" '
+                    f'stroke="#e0a83f" stroke-width="1.1" stroke-dasharray="3,2"/>')
+
+    return f"""<svg viewBox="0 0 {width} {height}" class="price-chart"
+                    preserveAspectRatio="none" role="img" aria-label="price chart">
+      <polyline points="{close_pts}" fill="none" stroke="#7ee787" stroke-width="1.4"/>
+      {sma_path}
+    </svg>
+    <div class="chart-legend"><span class="close-swatch"></span>close
+      <span class="sma-swatch"></span>SMA-50 &middot; {len(closes)} sessions</div>"""
+
+
 def _meta_line(ticker: str, sector_by_ticker: dict[str, tuple], cap_by_ticker: dict[str, tuple],
                risk_by_ticker: dict[str, dict]) -> str:
     parts = []
@@ -147,7 +216,8 @@ def _meta_line(ticker: str, sector_by_ticker: dict[str, tuple], cap_by_ticker: d
 def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[str],
              technicals_by_ticker: dict[str, dict], show_technicals: bool,
              sector_by_ticker: dict[str, tuple], cap_by_ticker: dict[str, tuple],
-             risk_by_ticker: dict[str, dict]) -> str:
+             risk_by_ticker: dict[str, dict],
+             price_series_by_ticker: dict[str, list[float]]) -> str:
     if not rows:
         return f"<h2>{title}</h2><p class='note'>no scores computed yet</p>"
 
@@ -159,6 +229,8 @@ def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[st
         body = "".join(_factor_row(FACTOR_LABELS[name], c.get(name)) for name in factor_names)
         total = factors.get("factors_total", 3)
         tech = _technicals_block(technicals_by_ticker.get(ticker)) if show_technicals else ""
+        chart = _price_chart_svg(price_series_by_ticker[ticker]) if (
+            show_technicals and ticker in price_series_by_ticker) else ""
         meta = _meta_line(ticker, sector_by_ticker, cap_by_ticker, risk_by_ticker)
         return f"""
         <details class="card">
@@ -168,6 +240,7 @@ def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[st
             <span class="avail">{factors['factors_available']}/{total} factors</span>
           </summary>
           {meta}
+          {chart}
           <table><tbody>{body}</tbody></table>
           {tech}
         </details>"""
@@ -244,7 +317,8 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
            technicals_by_ticker: dict[str, dict], sector_by_ticker: dict[str, tuple],
            cap_by_ticker: dict[str, tuple], backtest_summary: dict | None,
            risk_by_ticker: dict[str, dict], pipeline_last_success: dict[str, dict | None],
-           pipeline_recent_failures: list[dict]) -> str:
+           pipeline_recent_failures: list[dict],
+           price_series_by_ticker: dict[str, list[float]]) -> str:
     as_of = (combined_rows or fundamental_rows or [(None, None, None, date.today())])[0][3]
 
     fundamental_section = _section(
@@ -252,7 +326,7 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
         fundamental_rows, ["momentum", "quality_net_margin", "growth_revenue"],
         technicals_by_ticker, show_technicals=False,
         sector_by_ticker=sector_by_ticker, cap_by_ticker=cap_by_ticker,
-        risk_by_ticker=risk_by_ticker)
+        risk_by_ticker=risk_by_ticker, price_series_by_ticker=price_series_by_ticker)
     combined_section = _section(
         "Combined score (fundamental + technical)",
         "model combined-v1-rank &middot; adds trend strength and MACD momentum "
@@ -261,7 +335,7 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
         ["momentum", "quality_net_margin", "growth_revenue", "trend_strength", "macd_momentum"],
         technicals_by_ticker, show_technicals=True,
         sector_by_ticker=sector_by_ticker, cap_by_ticker=cap_by_ticker,
-        risk_by_ticker=risk_by_ticker)
+        risk_by_ticker=risk_by_ticker, price_series_by_ticker=price_series_by_ticker)
 
     return f"""<!doctype html>
 <html><head><meta charset="utf-8">
@@ -301,6 +375,16 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
                     font-size:12.5px; color:#666; font-style:italic; }}
   .meta {{ padding:0 16px 10px; font-size:12px; color:#8a8a8a; }}
   .meta i {{ color:#666; font-style:italic; }}
+  .price-chart {{ display:block; width:100%; height:90px; margin-top:6px;
+                   background:#0f1215; border-top:1px solid #22262c; }}
+  .chart-missing {{ padding:10px 16px; border-top:1px solid #22262c;
+                     font-size:12.5px; color:#666; font-style:italic; }}
+  .chart-legend {{ padding:6px 16px 12px; font-size:11.5px; color:#777; }}
+  .close-swatch, .sma-swatch {{ display:inline-block; width:10px; height:2px;
+                                 margin:0 4px 0 10px; vertical-align:middle; }}
+  .close-swatch:first-child {{ margin-left:0; }}
+  .close-swatch {{ background:#7ee787; }}
+  .sma-swatch {{ background:#e0a83f; }}
   .ic-box {{ display:flex; align-items:baseline; gap:10px; margin:14px 0 6px; }}
   .ic-value {{ font-size:28px; font-weight:700; font-variant-numeric:tabular-nums; }}
   .ic-label {{ color:#999; font-size:13px; }}
@@ -378,17 +462,23 @@ def main() -> None:
                 r for r in analytics_runs.recent(conn, limit=20) if r["outcome"] == "FAILED"
             ]
 
+            cur.execute(PRICE_SERIES_QUERY)
+            price_series_by_ticker: dict[str, list[float]] = {}
+            for ticker, _day, close in cur.fetchall():
+                price_series_by_ticker.setdefault(ticker, []).append(float(close))
+
     if not fundamental_rows and not combined_rows:
         raise SystemExit("no factor_scores rows -- run `make factors` and `make combined` first")
 
     OUT_DIR.mkdir(exist_ok=True)
     OUT_FILE.write_text(render(fundamental_rows, combined_rows, technicals_by_ticker,
                                sector_by_ticker, cap_by_ticker, backtest_summary,
-                               risk_by_ticker, pipeline_last_success, pipeline_recent_failures))
+                               risk_by_ticker, pipeline_last_success, pipeline_recent_failures,
+                               price_series_by_ticker))
     print(f"wrote {OUT_FILE} ({len(fundamental_rows)} fundamental-only, "
           f"{len(combined_rows)} combined, {len(technicals_by_ticker)} with technicals, "
           f"{len(sector_by_ticker)} with sector, {len(cap_by_ticker)} with market cap, "
-          f"{len(risk_by_ticker)} with risk metrics)")
+          f"{len(risk_by_ticker)} with risk metrics, {len(price_series_by_ticker)} with charts)")
 
 
 if __name__ == "__main__":
