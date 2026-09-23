@@ -21,6 +21,7 @@ from investment_intelligence.companies import STAGE_ONE
 from investment_intelligence.db import connect, migrate
 from investment_intelligence.ingest import backfill, incremental
 from investment_intelligence.ingest import rejections as rejection_log
+from investment_intelligence.observability import analytics_runs
 from investment_intelligence.observability import logging as structured
 from investment_intelligence.observability import status as status_mod
 from investment_intelligence.ingest import price_writer
@@ -265,8 +266,9 @@ def cmd_technicals(args: argparse.Namespace) -> None:
             )
             id_to_ticker = dict(cur.fetchall())
 
-        written = technicals.compute_and_store(conn, list(id_to_ticker), as_of)
-        conn.commit()
+        with analytics_runs.tracked_run(conn, "TECHNICALS", as_of=as_of) as run:
+            written = technicals.compute_and_store(conn, list(id_to_ticker), as_of)
+            run["rows_written"] = written
 
         rows = []
         for iid in id_to_ticker:
@@ -300,8 +302,9 @@ def cmd_risk(args: argparse.Namespace) -> None:
             )
             id_to_ticker = dict(cur.fetchall())
 
-        written = risk.compute_and_store(conn, list(id_to_ticker), as_of)
-        conn.commit()
+        with analytics_runs.tracked_run(conn, "RISK", as_of=as_of) as run:
+            written = risk.compute_and_store(conn, list(id_to_ticker), as_of)
+            run["rows_written"] = written
 
         rows = []
         for iid in id_to_ticker:
@@ -334,10 +337,11 @@ def cmd_combined(args: argparse.Namespace) -> None:
             )
             id_to_ticker = dict(cur.fetchall())
 
-        scores = combined_score.compute_scores(conn, list(id_to_ticker), as_of)
-        written = factor_score.store_scores(conn, as_of, scores,
-                                             model_version=combined_score.MODEL_VERSION)
-        conn.commit()
+        with analytics_runs.tracked_run(conn, "COMBINED_SCORE", as_of=as_of) as run:
+            scores = combined_score.compute_scores(conn, list(id_to_ticker), as_of)
+            written = factor_score.store_scores(conn, as_of, scores,
+                                                 model_version=combined_score.MODEL_VERSION)
+            run["rows_written"] = written
 
     print(f"as of {as_of}: {written} scores computed and stored "
           f"(model {combined_score.MODEL_VERSION})\n")
@@ -415,32 +419,37 @@ def cmd_sectors(args: argparse.Namespace) -> None:
     """Fetch and store each tracked company's SIC code and sector, from SEC
     EDGAR filer metadata. NOT local-research-only -- see migration 027 for
     why this table's licensing posture differs from prices/factors/technicals."""
-    results = classification.fetch_all([c.cik for c in STAGE_ONE])
     with connect() as conn:
-        with conn.cursor() as cur:
-            for r in results:
-                cur.execute(
-                    "SELECT instrument_id FROM instrument_external_ids "
-                    "WHERE scheme = 'SEC_CIK' AND value = %s", (str(r.cik),))
-                row = cur.fetchone()
-                if row is None:
-                    continue
-                cur.execute(
-                    """
-                    INSERT INTO sector_classifications
-                        (instrument_id, sic_code, sic_description, sector,
-                         source_id, verified_on)
-                    VALUES (%s, %s, %s, %s, 'SEC_EDGAR', %s)
-                    ON CONFLICT (instrument_id) DO UPDATE
-                       SET sic_code = excluded.sic_code,
-                           sic_description = excluded.sic_description,
-                           sector = excluded.sector,
-                           verified_on = excluded.verified_on,
-                           computed_at = now()
-                    """,
-                    (row[0], r.sic_code, r.sic_description, r.sector, date.today()),
-                )
-        conn.commit()
+        with analytics_runs.tracked_run(conn, "SECTORS") as run:
+            # The fetch lives inside the tracked run, not before it -- a
+            # network failure here is exactly the kind of thing the run log
+            # exists to catch, so it must not happen before the run even
+            # starts.
+            results = classification.fetch_all([c.cik for c in STAGE_ONE])
+            with conn.cursor() as cur:
+                for r in results:
+                    cur.execute(
+                        "SELECT instrument_id FROM instrument_external_ids "
+                        "WHERE scheme = 'SEC_CIK' AND value = %s", (str(r.cik),))
+                    row = cur.fetchone()
+                    if row is None:
+                        continue
+                    cur.execute(
+                        """
+                        INSERT INTO sector_classifications
+                            (instrument_id, sic_code, sic_description, sector,
+                             source_id, verified_on)
+                        VALUES (%s, %s, %s, %s, 'SEC_EDGAR', %s)
+                        ON CONFLICT (instrument_id) DO UPDATE
+                           SET sic_code = excluded.sic_code,
+                               sic_description = excluded.sic_description,
+                               sector = excluded.sector,
+                               verified_on = excluded.verified_on,
+                               computed_at = now()
+                        """,
+                        (row[0], r.sic_code, r.sic_description, r.sector, date.today()),
+                    )
+            run["rows_written"] = len(results)
 
     print(f"{len(results)} of {len(STAGE_ONE)} tracked companies classified\n")
     by_sector: dict[str, list[str]] = {}
@@ -466,19 +475,20 @@ def cmd_marketcap(args: argparse.Namespace) -> None:
             )
             id_to_ticker = dict(cur.fetchall())
 
-        results = []
-        for company in STAGE_ONE:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT instrument_id FROM instrument_external_ids "
-                    "WHERE scheme = 'SEC_CIK' AND value = %s", (str(company.cik),))
-                row = cur.fetchone()
-            if row is None:
-                continue
-            cap = market_cap.compute_and_store(conn, row[0], company.cik, as_of)
-            if cap is not None:
-                results.append((company.us_ticker, cap))
-        conn.commit()
+        with analytics_runs.tracked_run(conn, "MARKET_CAP", as_of=as_of) as run:
+            results = []
+            for company in STAGE_ONE:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT instrument_id FROM instrument_external_ids "
+                        "WHERE scheme = 'SEC_CIK' AND value = %s", (str(company.cik),))
+                    row = cur.fetchone()
+                if row is None:
+                    continue
+                cap = market_cap.compute_and_store(conn, row[0], company.cik, as_of)
+                if cap is not None:
+                    results.append((company.us_ticker, cap))
+            run["rows_written"] = len(results)
 
     print(f"as of {as_of}: {len(results)} of {len(STAGE_ONE)} tracked companies\n")
     for ticker, cap in sorted(results, key=lambda x: -x[1]):
@@ -511,9 +521,10 @@ def cmd_backtest(args: argparse.Namespace) -> None:
             )
             id_to_ticker = dict(cur.fetchall())
 
-        points = backtest.run(conn, list(id_to_ticker), checkpoints, forward_days)
-        written = backtest.store(conn, points)
-        conn.commit()
+        with analytics_runs.tracked_run(conn, "BACKTEST") as run:
+            points = backtest.run(conn, list(id_to_ticker), checkpoints, forward_days)
+            written = backtest.store(conn, points)
+            run["rows_written"] = written
 
     ic = backtest.information_coefficient(points)
     print(f"{len(checkpoints)} checkpoints ({since} to {until}, every {every_days}d), "
@@ -528,6 +539,35 @@ def cmd_backtest(args: argparse.Namespace) -> None:
                      "higher-ranked names tended to do WORSE afterward" if ic["ic"] < -0.1 else
                      "no clear relationship between rank and what happened next")
         print(f"  reading: {direction}")
+
+
+def cmd_analytics_status(args: argparse.Namespace) -> None:
+    """The local analytics pipeline's own operational snapshot -- the thing
+    `status` cannot show, because `ingestion_runs` only ever covers the
+    EDGAR fundamentals job (see analytics_runs.py's module docstring).
+    Answers "did last night's `make backtest` actually finish" without
+    reading the report and guessing from whether a number looks stale."""
+    with connect() as conn:
+        last = analytics_runs.last_success(conn)
+        recent = analytics_runs.recent(conn, limit=args.limit)
+
+    print("LAST SUCCESSFUL RUN, PER JOB")
+    for job in analytics_runs.JOBS:
+        row = last[job]
+        if row is None:
+            print(f"  !! {job:16s} never succeeded")
+            continue
+        as_of = f"as of {row['as_of']}" if row["as_of"] else "(not a single-as_of job)"
+        print(f"  ok {job:16s} {row['finished_at']}  {as_of}  wrote={row['rows_written']}")
+
+    print(f"\nRECENT RUNS (last {args.limit})")
+    for r in recent:
+        seconds = ("?" if r["finished_at"] is None else
+                   f"{(r['finished_at'] - r['started_at']).total_seconds():.1f}")
+        print(f"  run {r['run_id']:>4} {r['job']:16s} {r['outcome']:8s} {seconds:>6}s"
+              f"  written={r['rows_written']}")
+        if r["error"]:
+            print(f"      {r['error']}")
 
 
 
@@ -804,6 +844,11 @@ def main(argv: list[str] | None = None) -> None:
     bt.add_argument("--every-days", type=int, default=180, dest="every_days")
     bt.add_argument("--forward-days", type=int, default=180, dest="forward_days")
     bt.set_defaults(func=cmd_backtest)
+
+    ast_p = sub.add_parser("analytics-status",
+                           help="operational snapshot for the local analytics pipeline")
+    ast_p.add_argument("--limit", type=int, default=10)
+    ast_p.set_defaults(func=cmd_analytics_status)
 
     inc = sub.add_parser("incremental")
     inc.add_argument("--lookback", type=int, default=2,

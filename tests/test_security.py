@@ -78,7 +78,12 @@ EXPECTED_GRANTS = {
                        # Migration 029.
                        "backtest_results",
                        # Migration 030.
-                       "risk_metrics"},
+                       "risk_metrics",
+                       # Migration 031. The analytics pipeline's own run
+                       # log -- append-only writes (a new row per run),
+                       # same INSERT/UPDATE split as ingestion_runs beside
+                       # it: INSERT starts a run, UPDATE closes it out.
+                       "analytics_runs"},
             "UPDATE": {"ingestion_runs", "tracked_instruments", "sources",
                        "line_items", "instrument_external_ids",
                        "ingestion_schedule",
@@ -90,7 +95,10 @@ EXPECTED_GRANTS = {
                        # Migrations 027/028: also recomputable on rerun.
                        "sector_classifications", "market_cap_snapshots",
                        # Migrations 029/030: also recomputable on rerun.
-                       "backtest_results", "risk_metrics"},
+                       "backtest_results", "risk_metrics",
+                       # Migration 031: closing out a RUNNING row to
+                       # SUCCESS/FAILED is an UPDATE, same as ingestion_runs.
+                       "analytics_runs"},
             "DELETE": {"metric_values", "quality_findings"},
         },
         # Invariant 8: nothing at all on the user domain.

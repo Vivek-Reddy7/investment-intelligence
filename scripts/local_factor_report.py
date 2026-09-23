@@ -30,6 +30,7 @@ from pathlib import Path
 import psycopg
 
 from investment_intelligence.analytics import backtest, combined_score, factor_score
+from investment_intelligence.observability import analytics_runs
 
 OUT_DIR = Path(__file__).parent.parent / "local-only"
 OUT_FILE = OUT_DIR / "factor_report.html"
@@ -187,6 +188,43 @@ def _section(title: str, subtitle: str, rows: list[tuple], factor_names: list[st
       {partial_section}"""
 
 
+JOB_LABELS = {
+    "TECHNICALS": "technicals", "RISK": "risk", "COMBINED_SCORE": "combined",
+    "SECTORS": "sectors", "MARKET_CAP": "marketcap", "BACKTEST": "backtest",
+}
+
+
+def _pipeline_block(last_success: dict[str, dict | None], recent_failures: list[dict]) -> str:
+    """Per-job last-success line plus any recent failure, from
+    `analytics_runs` (migration 031) -- the run log `ingestion_runs` never
+    covered because this pipeline is recomputation, not source ingestion.
+    See observability/analytics_runs.py's module docstring."""
+    rows = []
+    for job in analytics_runs.JOBS:
+        row = last_success.get(job)
+        label = JOB_LABELS.get(job, job.lower())
+        if row is None:
+            rows.append(f'<tr class="missing"><td>{label}</td>'
+                        f'<td colspan="2">never succeeded</td></tr>')
+            continue
+        as_of = row["as_of"].isoformat() if row["as_of"] else "-"
+        rows.append(f'<tr><td>{label}</td><td>{row["finished_at"]:%Y-%m-%d %H:%M}</td>'
+                    f'<td class="num">as_of {as_of} &middot; wrote {row["rows_written"]}</td></tr>')
+
+    failures_html = ""
+    if recent_failures:
+        items = "".join(
+            f'<li><b>{JOB_LABELS.get(r["job"], r["job"].lower())}</b> '
+            f'({r["started_at"]:%Y-%m-%d %H:%M}): {r["error"]}</li>'
+            for r in recent_failures
+        )
+        failures_html = f'<div class="pipeline-warn">Recent failures:<ul>{items}</ul></div>'
+
+    return f"""
+      <table class="pipeline"><tbody>{''.join(rows)}</tbody></table>
+      {failures_html}"""
+
+
 def _backtest_block(summary: dict | None) -> str:
     if summary is None or summary.get("n", 0) == 0:
         return '<p class="note">No backtest run yet -- `make backtest`.</p>'
@@ -205,7 +243,8 @@ def _backtest_block(summary: dict | None) -> str:
 def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
            technicals_by_ticker: dict[str, dict], sector_by_ticker: dict[str, tuple],
            cap_by_ticker: dict[str, tuple], backtest_summary: dict | None,
-           risk_by_ticker: dict[str, dict]) -> str:
+           risk_by_ticker: dict[str, dict], pipeline_last_success: dict[str, dict | None],
+           pipeline_recent_failures: list[dict]) -> str:
     as_of = (combined_rows or fundamental_rows or [(None, None, None, date.today())])[0][3]
 
     fundamental_section = _section(
@@ -265,6 +304,14 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
   .ic-box {{ display:flex; align-items:baseline; gap:10px; margin:14px 0 6px; }}
   .ic-value {{ font-size:28px; font-weight:700; font-variant-numeric:tabular-nums; }}
   .ic-label {{ color:#999; font-size:13px; }}
+  table.pipeline {{ width:100%; border-collapse:collapse; font-size:12.5px; }}
+  table.pipeline td {{ padding:6px 10px; border-top:1px solid #22262c; }}
+  table.pipeline td:first-child {{ color:#eee; font-weight:600; width:110px; }}
+  table.pipeline td.num {{ color:#888; text-align:right; }}
+  table.pipeline tr.missing td {{ color:#c77; font-style:italic; }}
+  .pipeline-warn {{ margin-top:10px; padding:10px 14px; background:#3a1414;
+                     border:1px solid #a63a3a; border-radius:6px; color:#f0a; font-size:12.5px; }}
+  .pipeline-warn ul {{ margin:6px 0 0 18px; padding:0; }}
 </style></head>
 <body>
   <div class="banner">
@@ -280,6 +327,11 @@ def render(fundamental_rows: list[tuple], combined_rows: list[tuple],
   </div>
   <h1>Investment scores</h1>
   <div class="as-of">as of {as_of}</div>
+
+  <h2>Pipeline -- did each job actually run</h2>
+  <div class="sub2">last successful run per job, from analytics_runs
+    (migration 031) &middot; run <code>make analytics-status</code> for full history</div>
+  {_pipeline_block(pipeline_last_success, pipeline_recent_failures)}
 
   <h2>Backtest -- does the combined score actually predict anything?</h2>
   <div class="sub2">rank correlation between composite_score and actual forward
@@ -321,13 +373,18 @@ def main() -> None:
             ]
             backtest_summary = backtest.information_coefficient(backtest_points)
 
+            pipeline_last_success = analytics_runs.last_success(conn)
+            pipeline_recent_failures = [
+                r for r in analytics_runs.recent(conn, limit=20) if r["outcome"] == "FAILED"
+            ]
+
     if not fundamental_rows and not combined_rows:
         raise SystemExit("no factor_scores rows -- run `make factors` and `make combined` first")
 
     OUT_DIR.mkdir(exist_ok=True)
     OUT_FILE.write_text(render(fundamental_rows, combined_rows, technicals_by_ticker,
                                sector_by_ticker, cap_by_ticker, backtest_summary,
-                               risk_by_ticker))
+                               risk_by_ticker, pipeline_last_success, pipeline_recent_failures))
     print(f"wrote {OUT_FILE} ({len(fundamental_rows)} fundamental-only, "
           f"{len(combined_rows)} combined, {len(technicals_by_ticker)} with technicals, "
           f"{len(sector_by_ticker)} with sector, {len(cap_by_ticker)} with market cap, "

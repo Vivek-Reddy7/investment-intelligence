@@ -45,6 +45,7 @@ help:
 	@echo "           make risk        — volatility, max drawdown, historical VaR"
 	@echo "           make size AMOUNT=5000 — split an amount across the top-ranked names"
 	@echo "           make factor-report — regenerate and open the local-only viewer"
+	@echo "           make analytics-status — did the local pipeline actually run, and when"
 
 # ---------------------------------------------------------------------------
 
@@ -156,6 +157,9 @@ factor-report:
 	$(PY) scripts/local_factor_report.py
 	@open local-only/factor_report.html 2>/dev/null || \
 	  echo "open local-only/factor_report.html in a browser"
+
+analytics-status:
+	$(PY) -m investment_intelligence.cli analytics-status
 
 # ---------------------------------------------------------------------------
 

@@ -235,3 +235,27 @@ def test_gaps_reports_completion_with_a_count(cli_env, capsys):
     cli.main(["gaps"])
     out = capsys.readouterr().out
     assert f"all {len(refs)} tracked instruments are DONE" in out
+
+
+def test_analytics_status_reports_never_succeeded_with_no_history(cli_env, capsys):
+    """`status` never covers this pipeline -- ingestion_runs is a different
+    table (see analytics_runs.py's module docstring). A fresh database must
+    say so plainly for every job, not just be silent about them."""
+    cli.main(["analytics-status"])
+    out = capsys.readouterr().out
+    for job in ("TECHNICALS", "RISK", "COMBINED_SCORE", "SECTORS",
+               "MARKET_CAP", "BACKTEST"):
+        assert f"{job:16s} never succeeded" in out
+
+
+def test_analytics_status_reports_a_real_run(cli_env, capsys):
+    from investment_intelligence.observability import analytics_runs
+
+    with analytics_runs.tracked_run(cli_env, "TECHNICALS", as_of=date(2026, 1, 2)) as run:
+        run["rows_written"] = 9
+
+    cli.main(["analytics-status"])
+    out = capsys.readouterr().out
+    assert "as of 2026-01-02" in out
+    assert "wrote=9" in out
+    assert "run    1 TECHNICALS       SUCCESS" in out
