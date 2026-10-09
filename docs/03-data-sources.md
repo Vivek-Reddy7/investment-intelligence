@@ -61,6 +61,19 @@ From [NSE's 15-Min delayed data tariff](https://archives.nseindia.com/content/pr
 That last note kills the obvious workaround. Delaying data further does not
 reduce the fee. There is no delay long enough to make display free.
 
+> **Update 2026-10-09 — NSE's current price list.** The two tariff documents
+> above are the ones this decision was made on and are kept as the record. NSE's
+> consolidated
+> [price list effective 1 April 2026](https://nsearchives.nseindia.com/web/mediaattachment/2026-03/NSE_Pricing_file_-_Domestic_clients_20260309171343.pdf)
+> states fees explicitly *per annum*, per site and per medium, which resolves
+> the "presumed annual" caveat in §1.1. Its figures differ from the older
+> documents: end-of-day (Capital Market) **₹1,00,000**, 15-minute-delayed
+> snapshot **₹1,20,000**, real-time Level 1 snapshot **₹29,20,000** for a
+> website and **₹23,45,000** for a mobile app. The conclusion is unchanged
+> (public display of NSE prices is licensed per medium and priced out of reach
+> for this project), but quote the current document, not the older ones, when
+> the exact figure matters.
+
 ### 1.3 Redistribution generally
 
 NSE's Data Usage and Data Sharing Policy states that trading members and
