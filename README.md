@@ -55,6 +55,7 @@ data.
 | Free Indian screeners (Screener.in and similar) | Web screeners over current financials | Broad Indian coverage, polished, free | They show the current, restated view, so you cannot ask what a screen returned on a past date ([docs/01 §2.1](docs/01-vision-and-scope.md)) |
 | [S&P Compustat Point-in-Time](https://www.spglobal.com/market-intelligence/en/solutions/products/fundamental-data) | Commercial database that preserves each restatement; S&P's own pages put its snapshots as far back as 1987 | Institutional depth and coverage | A licensed product with closed data and schema, not something an individual can audit or run |
 | [Sharadar Core US Fundamentals (SF1)](https://data.nasdaq.com/databases/SF1) | Paid dataset on Nasdaq Data Link with as-reported dimensions keyed to the filing date | Clean as-reported series for US companies | A purchased dataset rather than a pipeline you can inspect; US companies only |
+| [pit-fundamentals](https://github.com/christianpichichero-max/pit-fundamentals) | Small CC0 CSV of US fundamentals from SEC EDGAR, each value stamped with a `first_filed` date | The closest open neighbour: same source, same idea | A static data pack (its README states 5 companies, annual filings), not a store with enforced history or a screening layer |
 | [edgartools](https://github.com/dgunning/edgartools) | MIT-licensed Python library for reading EDGAR filings and XBRL | Excellent parsing of the same source this project uses | A library for reading filings, not a versioned store with a screening layer |
 
 **What this adds:** the integrity guarantees live in the database rather than
@@ -63,7 +64,9 @@ runs on free public data, and every number links to the filing it came from.
 
 **What it does not add:** coverage, a data licence, or a moat. A well-funded
 team could rebuild the idea quickly. The value here is the implementation and
-the decisions behind it, which are written down.
+the decisions behind it, which are written down. The
+[project analysis](docs/project-analysis.md) rates the novelty of the idea
+**Low** and sets out the strongest criticisms.
 
 ## Design decisions worth reading
 
@@ -216,6 +219,7 @@ and why — including what turned out to be wrong.
 | [17 Data quality](docs/17-data-quality.md) | Accounting-identity checks, and what they found |
 | [18 Documentation](docs/18-documentation.md) | Verifying the docs by running them from clean |
 | [18 Runbook](docs/18-runbook.md) | What to do when something breaks |
+| [Project analysis](docs/project-analysis.md) | Novelty rating, build-vs-contribute, a harsh stress test, and a staged roadmap with gate questions |
 | [API reference](docs/api-reference.md) | The five endpoints |
 | [Backlog](docs/backlog.md) | Noticed mid-phase, deliberately not done yet |
 
